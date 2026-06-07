@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cstdio>
 #include <map>
+#include <set>
 #include <string>
 #include <sys/stat.h>
 #include <vector>
@@ -72,6 +73,16 @@ public:
     }
 
     bool readText(const std::string& name, std::string& text, std::string& error) {
+        std::vector<unsigned char> bytes;
+        if (!readBytes(name, bytes, error)) {
+            return false;
+        }
+
+        text.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        return true;
+    }
+
+    bool readBytes(const std::string& name, std::vector<unsigned char>& out, std::string& error) {
         const ZipEntry* entry = findEntry(name);
         if (entry == nullptr) {
             error = "Missing EPUB entry: " + name;
@@ -100,7 +111,7 @@ public:
         }
 
         if (entry->method == 0) {
-            text.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            out = bytes;
             return true;
         }
 
@@ -124,7 +135,7 @@ public:
             return false;
         }
 
-        text.assign(reinterpret_cast<const char*>(inflated.data()), stream.total_out);
+        out.assign(inflated.begin(), inflated.begin() + stream.total_out);
         return true;
     }
 
@@ -292,6 +303,78 @@ std::string findRootfilePath(const std::string& containerXml) {
     return "";
 }
 
+bool isImageMediaType(const std::string& mediaType) {
+    return mediaType.rfind("image/", 0) == 0;
+}
+
+std::string imageMarker(const std::string& imagePath) {
+    return "<br/>[[NXREADER_IMAGE:" + imagePath + "]]<br/>";
+}
+
+std::string htmlWithImageMarkers(const std::string& html, const std::string& chapterPath) {
+    std::string out;
+    const std::string chapterDir = directoryName(chapterPath);
+    size_t cursor = 0;
+
+    while (cursor < html.size()) {
+        const size_t imgStart = html.find("<img", cursor);
+        if (imgStart == std::string::npos) {
+            out += html.substr(cursor);
+            break;
+        }
+
+        out += html.substr(cursor, imgStart - cursor);
+        const size_t imgEnd = html.find('>', imgStart);
+        if (imgEnd == std::string::npos) {
+            break;
+        }
+
+        const std::string src = attrValue(html, imgStart, "src");
+        if (!src.empty() && src.rfind("data:", 0) != 0) {
+            out += imageMarker(normalizeZipPath(joinPath(chapterDir, src)));
+        }
+
+        cursor = imgEnd + 1;
+    }
+
+    return out;
+}
+
+void addImageIfReadable(ZipArchive& zip, EpubBook& book, std::set<std::string>& seenImages, const std::string& href,
+                        const std::string& mediaType) {
+    if (href.empty() || seenImages.find(href) != seenImages.end()) {
+        return;
+    }
+
+    std::string ignoredError;
+    EpubImage image;
+    image.href = href;
+    image.mediaType = mediaType;
+    if (zip.readBytes(href, image.bytes, ignoredError) && !image.bytes.empty()) {
+        book.images.push_back(image);
+        seenImages.insert(href);
+    }
+}
+
+std::vector<std::string> extractImageMarkers(const std::string& text) {
+    std::vector<std::string> paths;
+    size_t cursor = 0;
+    constexpr const char* marker = "[[NXREADER_IMAGE:";
+    constexpr size_t markerLength = 17;
+
+    while ((cursor = text.find(marker, cursor)) != std::string::npos) {
+        const size_t pathStart = cursor + markerLength;
+        const size_t pathEnd = text.find("]]", pathStart);
+        if (pathEnd == std::string::npos) {
+            break;
+        }
+        paths.push_back(text.substr(pathStart, pathEnd - pathStart));
+        cursor = pathEnd + 2;
+    }
+
+    return paths;
+}
+
 }  // namespace
 
 bool loadEpub(const std::string& path, EpubBook& book, std::string& error) {
@@ -329,23 +412,65 @@ bool loadEpub(const std::string& path, EpubBook& book, std::string& error) {
     }
 
     struct ManifestItem {
+        std::string id;
         std::string href;
         std::string mediaType;
+        std::string properties;
     };
 
     std::map<std::string, ManifestItem> manifest;
+    std::string coverId;
+    size_t metaStart = 0;
+    while ((metaStart = opfXml.find("<meta", metaStart)) != std::string::npos) {
+        if (attrValue(opfXml, metaStart, "name") == "cover") {
+            coverId = attrValue(opfXml, metaStart, "content");
+        }
+        metaStart += 5;
+    }
+
     size_t itemStart = 0;
     while ((itemStart = opfXml.find("<item", itemStart)) != std::string::npos) {
         const std::string id = attrValue(opfXml, itemStart, "id");
         const std::string href = attrValue(opfXml, itemStart, "href");
         const std::string mediaType = attrValue(opfXml, itemStart, "media-type");
+        const std::string properties = attrValue(opfXml, itemStart, "properties");
         if (!id.empty() && !href.empty()) {
-            manifest[id] = {href, mediaType};
+            manifest[id] = {id, href, mediaType, properties};
         }
         itemStart += 5;
     }
 
     const std::string opfDir = directoryName(opfPath);
+    std::set<std::string> seenImages;
+    const ManifestItem* coverItem = nullptr;
+    for (const auto& pair : manifest) {
+        const ManifestItem& item = pair.second;
+        if (!isImageMediaType(item.mediaType)) {
+            continue;
+        }
+
+        const std::string lowerId = lowerCopy(item.id);
+        const std::string lowerHref = lowerCopy(item.href);
+        if ((!coverId.empty() && item.id == coverId) ||
+            item.properties.find("cover-image") != std::string::npos ||
+            lowerId.find("cover") != std::string::npos ||
+            lowerHref.find("cover") != std::string::npos) {
+            coverItem = &item;
+            break;
+        }
+    }
+
+    if (coverItem != nullptr) {
+        book.coverImage.href = normalizeZipPath(joinPath(opfDir, coverItem->href));
+        book.coverImage.mediaType = coverItem->mediaType;
+        zip.readBytes(book.coverImage.href, book.coverImage.bytes, error);
+        error.clear();
+        if (!book.coverImage.bytes.empty()) {
+            book.images.push_back(book.coverImage);
+            seenImages.insert(book.coverImage.href);
+        }
+    }
+
     size_t itemRefStart = 0;
     while ((itemRefStart = opfXml.find("<itemref", itemRefStart)) != std::string::npos) {
         const std::string idref = attrValue(opfXml, itemRefStart, "idref");
@@ -359,7 +484,19 @@ bool loadEpub(const std::string& path, EpubBook& book, std::string& error) {
                 chapter.href = chapterPath;
                 chapter.mediaType = item.mediaType;
                 if (zip.readText(chapterPath, html, error)) {
-                    chapter.text = stripTagsToText(html);
+                    chapter.text = stripTagsToText(htmlWithImageMarkers(html, chapterPath));
+                    for (const std::string& imagePath : extractImageMarkers(chapter.text)) {
+                        std::string mediaType;
+                        for (const auto& pair : manifest) {
+                            const ManifestItem& manifestItem = pair.second;
+                            const std::string manifestPath = normalizeZipPath(joinPath(opfDir, manifestItem.href));
+                            if (manifestPath == imagePath) {
+                                mediaType = manifestItem.mediaType;
+                                break;
+                            }
+                        }
+                        addImageIfReadable(zip, book, seenImages, imagePath, mediaType);
+                    }
                 } else {
                     chapter.text = error;
                     zip.close();

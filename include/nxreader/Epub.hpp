@@ -11,9 +11,17 @@ struct EpubChapter {
     std::string text;
 };
 
+struct EpubImage {
+    std::string href;
+    std::string mediaType;
+    std::vector<unsigned char> bytes;
+};
+
 struct EpubBook {
     std::string path;
     std::string title;
+    EpubImage coverImage;
+    std::vector<EpubImage> images;
     std::vector<EpubChapter> chapters;
 };
 

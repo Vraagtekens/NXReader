@@ -11,23 +11,46 @@ namespace nxreader {
 namespace {
 
 constexpr int kReaderColumns = 72;
-constexpr int kReaderLinesPerPage = 18;
+constexpr const char* kCoverPageMarker = "[[NXREADER_COVER]]";
+constexpr const char* kImagePageMarker = "[[NXREADER_IMAGE:";
 
 int pageCount(const ReaderState& state) {
     return std::max(1, static_cast<int>(state.pages.size()));
 }
 
-std::vector<std::string> paginateForViewport(const std::string& text) {
-    const std::vector<std::string> lines = wrapTextLines(text, kReaderColumns);
+int linesPerPageForSettings(const AppSettings& settings) {
+    if (settings.fontSize >= 36) {
+        return 10;
+    }
+    if (settings.fontSize >= 32) {
+        return 12;
+    }
+    if (settings.fontSize >= 28) {
+        return 14;
+    }
+    if (settings.fontSize >= 24) {
+        return 16;
+    }
+    return 18;
+}
+
+int columnsForSettings(const AppSettings& settings) {
+    return std::max(48, kReaderColumns - (settings.fontSize - 28));
+}
+
+std::vector<std::string> paginateForViewport(const std::string& text, const AppSettings& settings) {
+    const std::vector<std::string> lines = wrapTextLines(text, columnsForSettings(settings));
     std::vector<std::string> pages;
     std::string page;
     int usedLines = 0;
+    const int linesPerPage = linesPerPageForSettings(settings);
 
     for (const std::string& line : lines) {
         const bool heading = line.rfind("## ", 0) == 0;
-        const int lineCost = line.empty() ? 1 : (heading ? 2 : 1);
+        const bool image = line.rfind(kImagePageMarker, 0) == 0;
+        const int lineCost = image ? 10 : (line.empty() ? 1 : (heading ? 2 : 1));
 
-        if (usedLines > 0 && usedLines + lineCost > kReaderLinesPerPage) {
+        if (usedLines > 0 && usedLines + lineCost > linesPerPage) {
             pages.push_back(page);
             page.clear();
             usedLines = 0;
@@ -53,23 +76,24 @@ std::vector<std::string> paginateForViewport(const std::string& text) {
 
 ReaderState makeReaderState() {
     ReaderState state;
-    state.pages.push_back("Select an EPUB file from sdmc:/books to begin.");
+    state.pages.push_back("Select an EPUB file from sdmc:/switch/NXReader/books to begin.");
     return state;
 }
 
-void loadReaderBook(ReaderState& state, const EpubBook& book, const std::string& fallbackName) {
+void loadReaderBook(ReaderState& state, const EpubBook& book, const std::string& fallbackName, const AppSettings& settings) {
     state.bookName = book.title.empty() ? fallbackName : book.title;
     state.bookPath = book.path;
     state.loadError.clear();
+    state.coverImage = book.coverImage;
+    state.images = book.images;
+    state.chapterTexts.clear();
     state.pages.clear();
 
-    std::string combinedText;
     for (const EpubChapter& chapter : book.chapters) {
-        combinedText += chapter.text;
-        combinedText += "\n\n";
+        state.chapterTexts.push_back(chapter.text);
     }
 
-    state.pages = paginateForViewport(combinedText);
+    repaginateReader(state, settings);
     state.page = loadLastPage(state.bookPath.c_str(), pageCount(state));
 }
 
@@ -77,9 +101,28 @@ void loadReaderError(ReaderState& state, const std::string& bookName, const std:
     state.bookName = bookName;
     state.bookPath = path;
     state.loadError = error;
+    state.coverImage = {};
+    state.images.clear();
+    state.chapterTexts.clear();
     state.pages.clear();
     state.pages.push_back(consoleSafeText(error));
     state.page = 1;
+}
+
+void repaginateReader(ReaderState& state, const AppSettings& settings) {
+    const int oldPage = state.page;
+    std::vector<std::string> allPages;
+
+    for (const std::string& chapterText : state.chapterTexts) {
+        std::vector<std::string> chapterPages = paginateForViewport(chapterText, settings);
+        allPages.insert(allPages.end(), chapterPages.begin(), chapterPages.end());
+    }
+
+    state.pages = allPages.empty() ? paginateForViewport("This book has no readable text yet.", settings) : allPages;
+    if (!state.coverImage.bytes.empty()) {
+        state.pages.insert(state.pages.begin(), kCoverPageMarker);
+    }
+    state.page = std::max(1, std::min(oldPage, pageCount(state)));
 }
 
 void nextPage(ReaderState& state) {

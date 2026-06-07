@@ -5,8 +5,8 @@ libnx, SDL2, SDL2_ttf, and devkitPro.
 
 This first version is intentionally small: it builds a `.nro`, browses `.epub`
 files from the SD card, extracts basic EPUB text, renders it with a bundled
-TrueType font, supports button and touch page turns, toggles a dark-mode flag,
-and saves the last demo page to the SD card.
+TrueType fonts, supports button and touch page turns, toggles a dark-mode flag,
+and saves the last page per book to the SD card.
 
 ## Planned App Features
 
@@ -24,6 +24,7 @@ Install devkitPro with the Switch toolchain:
 sudo dkp-pacman -S switch-dev
 sudo dkp-pacman -S switch-zlib
 sudo dkp-pacman -S switch-sdl2 switch-sdl2_ttf
+sudo dkp-pacman -S switch-sdl2_image
 ```
 
 Make sure these environment variables are available in your shell:
@@ -98,16 +99,49 @@ Reader:
 - `A`, D-Pad Right, or D-Pad Down: next page
 - `B`, D-Pad Left, or D-Pad Up: previous page
 - `X`: toggle the dark-mode flag
+- `Y`: open reading settings
 - `-`: back to browser
 - `+`: exit
 - Touch the left or right side of the screen to turn pages
+- Hold `ZL` + `ZR`, then hold D-Pad Left or Right to skim through pages
+
+Chapters start on a new reader page. Page counts are generated from wrapped
+reader text, so changing font size or margins will change the total page count.
+The reader header appears when opening a book or pressing a reader button, then
+auto-hides after a short moment. This page-turn header behavior can be disabled
+in reading settings.
+
+Reading settings:
+
+- `Y`: close settings
+- D-Pad Up/Down: choose setting
+- D-Pad Right or `A`: increase/change selected setting
+- D-Pad Left or `B`: decrease/change selected setting
+
+Font size is saved to `sdmc:/switch/NXReader/settings.txt`. The app bundles
+Noto Sans and Noto Serif. Every `.ttf` or `.otf` font found under this folder is
+added to the font selector:
+
+```text
+sdmc:/switch/NXReader/fonts/
+```
+
+It can also try `.woff2`, but `.ttf` is safest on Switch:
+
+```text
+sdmc:/switch/NXReader/fonts/open-dyslexic/opendyslexic-regular-webfont.ttf
+```
+
+A single regular font file is enough for reading. A `.ttf` is safest on Switch.
+Separate bold/italic font files are nicer for real typography, but SDL_ttf can
+fake bold for headings while using only the regular font.
 
 ## Books Folder
 
 Put EPUB files here on the SD card:
 
 ```text
-sdmc:/books
+sdmc:/switch/NXReader/books
 ```
 
 Subfolders are supported. The browser only shows folders and `.epub` files.
@@ -117,12 +151,14 @@ Subfolders are supported. The browser only shows folders and `.epub` files.
 NXReader now opens the EPUB ZIP container, reads `META-INF/container.xml`,
 loads the OPF package file, follows the spine order, decompresses XHTML
 chapters with zlib, removes CSS/script blocks, decodes common HTML entities,
-strips tags, and paginates the plain text into the SDL reader.
+extracts cover and inline image files, strips tags, and paginates the content
+into the SDL reader.
 
-This is still a first parser pass. It does not handle CSS, images, embedded
-fonts, rich layout, or advanced Unicode shaping yet. The SDL renderer uses
-`romfs/font.ttf`, currently Noto Sans, so French accents such as `é` render as
-real glyphs. Page progress is saved per book path.
+This is still a first parser pass. It does not handle CSS, embedded fonts, rich
+layout, SVG images, or advanced Unicode shaping yet. PNG/JPEG covers and inline
+images are rendered with SDL_image. The SDL renderer uses bundled Noto fonts, so
+French accents such as `é` render as real glyphs. Page progress is saved per
+book path.
 
 ## Source Layout
 
@@ -139,14 +175,17 @@ source/main.cpp     tiny app entry point
 
 ## Save Data
 
-The demo saves the last page here:
+Settings are saved here:
 
 ```text
-sdmc:/switch/NXReader/last_page.txt
+sdmc:/switch/NXReader/settings.txt
 ```
 
-Later this should become a small settings/progress file keyed by EPUB path or
-book identifier.
+Page progress is saved in the same directory, keyed by EPUB path:
+
+```text
+sdmc:/switch/NXReader/progress_<book-hash>.txt
+```
 
 ## Suggested Roadmap
 

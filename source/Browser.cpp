@@ -72,10 +72,21 @@ void clampBrowserSelection(BrowserState& state) {
 void scanBookDir(BrowserState& state) {
     state.entries.clear();
     state.message.clear();
+    state.visibleFiles = 0;
+    state.hiddenFiles = 0;
+    state.visibleDirs = 0;
 
     DIR* dir = opendir(state.currentDir.c_str());
     if (dir == nullptr) {
-        state.message = "Could not open this folder. Expected SD path: sdmc:/books";
+        mkdir("sdmc:/switch", 0777);
+        mkdir(kSaveDir, 0777);
+        mkdir(kFontsRoot, 0777);
+        mkdir(kBooksRoot, 0777);
+        dir = opendir(state.currentDir.c_str());
+    }
+
+    if (dir == nullptr) {
+        state.message = "Could not open this folder. Expected SD path: sdmc:/switch/NXReader/books";
         state.currentDir = kBooksRoot;
         state.selected = 0;
         state.scroll = 0;
@@ -96,13 +107,20 @@ void scanBookDir(BrowserState& state) {
         bool directory = false;
         long long size = 0;
         if (!readPathInfo(path, directory, size)) {
+            state.hiddenFiles += 1;
             continue;
         }
 
         if (!directory && (!endsWithIgnoreCase(name, ".epub") || size <= 0)) {
+            state.hiddenFiles += 1;
             continue;
         }
 
+        if (directory) {
+            state.visibleDirs += 1;
+        } else {
+            state.visibleFiles += 1;
+        }
         state.entries.push_back({name, path, size, directory, false});
     }
 
@@ -119,7 +137,9 @@ void scanBookDir(BrowserState& state) {
     });
 
     if (state.entries.empty()) {
-        state.message = "No .epub files found here. Put books in sdmc:/books.";
+        state.message = "No .epub files found here. Put books in sdmc:/switch/NXReader/books.";
+    } else if (state.hiddenFiles > 0) {
+        state.message = "Showing folders and .epub files. Hidden non-EPUB/invalid files: " + std::to_string(state.hiddenFiles);
     }
 
     clampBrowserSelection(state);

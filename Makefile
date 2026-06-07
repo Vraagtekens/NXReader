@@ -40,6 +40,9 @@ ifeq ($(filter clean clean-macos,$(MAKECMDGOALS)),)
   ifeq ($(wildcard $(PORTLIBS)/include/SDL2/SDL_ttf.h),)
     $(error switch-sdl2_ttf not found. Run: sudo dkp-pacman -S switch-sdl2 switch-sdl2_ttf)
   endif
+  ifeq ($(wildcard $(PORTLIBS)/include/SDL2/SDL_image.h),)
+    $(error switch-sdl2_image not found. Run: sudo dkp-pacman -S switch-sdl2_image)
+  endif
 endif
 
 PREFIX      := $(DEVKITA64)/bin/aarch64-none-elf-
@@ -50,8 +53,8 @@ NACPTOOL    := $(DEVKITPRO)/tools/bin/nacptool
 ELF2NRO     := $(DEVKITPRO)/tools/bin/elf2nro
 NXLINK      := $(DEVKITPRO)/tools/bin/nxlink
 PKG_CONFIG  := $(PORTLIBS)/bin/aarch64-none-elf-pkg-config
-SDL_CFLAGS  := $(shell $(PKG_CONFIG) --cflags sdl2 SDL2_ttf 2>/dev/null)
-SDL_LIBS    := $(shell $(PKG_CONFIG) --libs sdl2 SDL2_ttf 2>/dev/null)
+SDL_CFLAGS  := $(shell $(PKG_CONFIG) --cflags sdl2 SDL2_ttf SDL2_image 2>/dev/null)
+SDL_LIBS    := $(shell $(PKG_CONFIG) --libs sdl2 SDL2_ttf SDL2_image 2>/dev/null)
 
 ARCH        := -march=armv8-a -mtune=cortex-a57 -mtp=soft -fPIE
 

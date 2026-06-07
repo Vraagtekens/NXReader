@@ -1,6 +1,7 @@
 #include "nxreader/Storage.hpp"
 
 #include "nxreader/Constants.hpp"
+#include "nxreader/Settings.hpp"
 
 #include <cstdio>
 #include <string>
@@ -11,6 +12,7 @@ namespace nxreader {
 void ensureSaveDirExists() {
     mkdir("sdmc:/switch", 0777);
     mkdir(kSaveDir, 0777);
+    mkdir(kFontsRoot, 0777);
 }
 
 namespace {
@@ -67,6 +69,40 @@ void saveLastPage(const char* bookPath, int page) {
     }
 
     std::fprintf(file, "%d\n%s\n", page, bookPath == nullptr ? "" : bookPath);
+    std::fclose(file);
+}
+
+AppSettings loadSettings() {
+    AppSettings settings;
+    FILE* file = std::fopen("sdmc:/switch/NXReader/settings.txt", "r");
+    if (file == nullptr) {
+        return settings;
+    }
+
+    int fontSize = settings.fontSize;
+    int fontIndex = settings.fontIndex;
+    int showHeaderOnTurn = settings.showHeaderOnTurn ? 1 : 0;
+    std::fscanf(file, "fontSize=%d\nfontIndex=%d\nshowHeaderOnTurn=%d", &fontSize, &fontIndex, &showHeaderOnTurn);
+    std::fclose(file);
+
+    settings.fontSize = clampFontSize(fontSize);
+    settings.fontIndex = clampFontIndex(fontIndex);
+    settings.showHeaderOnTurn = showHeaderOnTurn != 0;
+    return settings;
+}
+
+void saveSettings(const AppSettings& settings) {
+    ensureSaveDirExists();
+
+    FILE* file = std::fopen("sdmc:/switch/NXReader/settings.txt", "w");
+    if (file == nullptr) {
+        return;
+    }
+
+    std::fprintf(file, "fontSize=%d\nfontIndex=%d\nshowHeaderOnTurn=%d\n",
+                 clampFontSize(settings.fontSize),
+                 clampFontIndex(settings.fontIndex),
+                 settings.showHeaderOnTurn ? 1 : 0);
     std::fclose(file);
 }
 

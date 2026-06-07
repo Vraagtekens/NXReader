@@ -18,6 +18,9 @@ struct BrowserState {
     std::vector<BrowserEntry> entries;
     int selected = 0;
     int scroll = 0;
+    int visibleFiles = 0;
+    int hiddenFiles = 0;
+    int visibleDirs = 0;
     std::string message;
 };
 
