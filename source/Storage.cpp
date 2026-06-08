@@ -17,6 +17,7 @@ void ensureSaveDirExists() {
     mkdir("sdmc:/switch", 0777);
     mkdir(kSaveDir, 0777);
     mkdir(kFontsRoot, 0777);
+    mkdir(kSoundsRoot, 0777);
 }
 
 namespace {

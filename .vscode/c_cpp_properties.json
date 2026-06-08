@@ -1,0 +1,40 @@
+{
+  "configurations": [
+    {
+      "name": "Switch devkitPro",
+      "includePath": [
+        "${workspaceFolder}/include",
+        "/opt/devkitpro/libnx/include",
+        "/opt/devkitpro/portlibs/switch/include",
+        "/opt/devkitpro/devkitA64/aarch64-none-elf/include"
+      ],
+      "defines": ["__SWITCH__"],
+      "compilerPath": "/opt/devkitpro/devkitA64/bin/aarch64-none-elf-g++",
+      "forcedInclude": [
+        "${workspaceFolder}/.vscode/intellisense-switch.h"
+      ],
+      "compilerArgs": [
+        "-U__APPLE__",
+        "-U__MACH__",
+        "-D__SWITCH__",
+        "-march=armv8-a",
+        "-mtune=cortex-a57",
+        "-mtp=soft",
+        "-fPIE"
+      ],
+      "cppStandard": "gnu++20",
+      "cStandard": "c17",
+      "intelliSenseMode": "gcc-arm64",
+      "browse": {
+        "path": [
+          "${workspaceFolder}/include",
+          "/opt/devkitpro/libnx/include",
+          "/opt/devkitpro/portlibs/switch/include",
+          "/opt/devkitpro/devkitA64/aarch64-none-elf/include"
+        ],
+        "limitSymbolsToIncludedHeaders": true
+      }
+    }
+  ],
+  "version": 4
+}

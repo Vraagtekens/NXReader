@@ -4,6 +4,6 @@
 
 namespace nxreader {
 
-bool translateFrenchToDutch(const std::string& text, std::string& translation, std::string& error);
+bool translateFrenchToDutch(const std::string &text, std::string &translation, std::string &error);
 
-}  // namespace nxreader
+} // namespace nxreader

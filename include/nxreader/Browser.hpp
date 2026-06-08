@@ -25,9 +25,9 @@ struct BrowserState {
 };
 
 BrowserState makeBrowserState();
-void scanBookDir(BrowserState& state);
-void clampBrowserSelection(BrowserState& state);
-void drawBrowser(const BrowserState& state);
-void enterParentDirectory(BrowserState& state);
+void scanBookDir(BrowserState &state);
+void clampBrowserSelection(BrowserState &state);
+void drawBrowser(const BrowserState &state);
+void enterParentDirectory(BrowserState &state);
 
-}  // namespace nxreader
+} // namespace nxreader

@@ -19,4 +19,4 @@ int settingsFontCount();
 std::string settingsFontName(int fontIndex);
 std::string settingsFontPath(int fontIndex);
 
-}  // namespace nxreader
+} // namespace nxreader

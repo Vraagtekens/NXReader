@@ -4,4 +4,4 @@ namespace nxreader {
 
 int runApp();
 
-}  // namespace nxreader
+} // namespace nxreader

@@ -7,13 +7,13 @@
 #include <cstdio>
 #include <cstring>
 #include <dirent.h>
-#include <sys/stat.h>
 #include <switch.h>
+#include <sys/stat.h>
 
 namespace nxreader {
 namespace {
 
-bool readPathInfo(const std::string& path, bool& directory, long long& size) {
+bool readPathInfo(const std::string &path, bool &directory, long long &size) {
     struct stat info;
     if (stat(path.c_str(), &info) != 0) {
         return false;
@@ -23,7 +23,7 @@ bool readPathInfo(const std::string& path, bool& directory, long long& size) {
     return true;
 }
 
-std::string parentDir(const std::string& path) {
+std::string parentDir(const std::string &path) {
     if (path == kBooksRoot) {
         return path;
     }
@@ -36,7 +36,7 @@ std::string parentDir(const std::string& path) {
     return path.substr(0, slash);
 }
 
-}  // namespace
+} // namespace
 
 BrowserState makeBrowserState() {
     BrowserState state;
@@ -44,7 +44,7 @@ BrowserState makeBrowserState() {
     return state;
 }
 
-void clampBrowserSelection(BrowserState& state) {
+void clampBrowserSelection(BrowserState &state) {
     if (state.entries.empty()) {
         state.selected = 0;
         state.scroll = 0;
@@ -69,18 +69,19 @@ void clampBrowserSelection(BrowserState& state) {
     }
 }
 
-void scanBookDir(BrowserState& state) {
+void scanBookDir(BrowserState &state) {
     state.entries.clear();
     state.message.clear();
     state.visibleFiles = 0;
     state.hiddenFiles = 0;
     state.visibleDirs = 0;
 
-    DIR* dir = opendir(state.currentDir.c_str());
+    DIR *dir = opendir(state.currentDir.c_str());
     if (dir == nullptr) {
         mkdir("sdmc:/switch", 0777);
         mkdir(kSaveDir, 0777);
         mkdir(kFontsRoot, 0777);
+        mkdir(kSoundsRoot, 0777);
         mkdir(kBooksRoot, 0777);
         dir = opendir(state.currentDir.c_str());
     }
@@ -97,8 +98,8 @@ void scanBookDir(BrowserState& state) {
         state.entries.push_back({"..", parentDir(state.currentDir), 0, true, true});
     }
 
-    while (dirent* entry = readdir(dir)) {
-        const char* name = entry->d_name;
+    while (dirent *entry = readdir(dir)) {
+        const char *name = entry->d_name;
         if (std::strcmp(name, ".") == 0 || std::strcmp(name, "..") == 0 || name[0] == '.') {
             continue;
         }
@@ -126,7 +127,7 @@ void scanBookDir(BrowserState& state) {
 
     closedir(dir);
 
-    std::sort(state.entries.begin(), state.entries.end(), [](const BrowserEntry& left, const BrowserEntry& right) {
+    std::sort(state.entries.begin(), state.entries.end(), [](const BrowserEntry &left, const BrowserEntry &right) {
         if (left.parent != right.parent) {
             return left.parent;
         }
@@ -139,13 +140,14 @@ void scanBookDir(BrowserState& state) {
     if (state.entries.empty()) {
         state.message = "No .epub files found here. Put books in sdmc:/switch/NXReader/books.";
     } else if (state.hiddenFiles > 0) {
-        state.message = "Showing folders and .epub files. Hidden non-EPUB/invalid files: " + std::to_string(state.hiddenFiles);
+        state.message =
+            "Showing folders and .epub files. Hidden non-EPUB/invalid files: " + std::to_string(state.hiddenFiles);
     }
 
     clampBrowserSelection(state);
 }
 
-void enterParentDirectory(BrowserState& state) {
+void enterParentDirectory(BrowserState &state) {
     if (state.currentDir == kBooksRoot) {
         return;
     }
@@ -156,7 +158,7 @@ void enterParentDirectory(BrowserState& state) {
     scanBookDir(state);
 }
 
-void drawBrowser(const BrowserState& state) {
+void drawBrowser(const BrowserState &state) {
     consoleClear();
 
     std::printf("NXReader - Books\n");
@@ -169,9 +171,9 @@ void drawBrowser(const BrowserState& state) {
 
     const int visibleEnd = std::min(static_cast<int>(state.entries.size()), state.scroll + kVisibleRows);
     for (int index = state.scroll; index < visibleEnd; ++index) {
-        const BrowserEntry& entry = state.entries[index];
-        const char* cursor = index == state.selected ? ">" : " ";
-        const char* kind = entry.directory ? "[DIR] " : "      ";
+        const BrowserEntry &entry = state.entries[index];
+        const char *cursor = index == state.selected ? ">" : " ";
+        const char *kind = entry.directory ? "[DIR] " : "      ";
 
         if (entry.directory) {
             std::printf("%s %s%s\n", cursor, kind, entry.name.c_str());
@@ -194,4 +196,4 @@ void drawBrowser(const BrowserState& state) {
     consoleUpdate(nullptr);
 }
 
-}  // namespace nxreader
+} // namespace nxreader

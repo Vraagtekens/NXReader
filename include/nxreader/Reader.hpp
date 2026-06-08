@@ -46,11 +46,13 @@ struct ReaderState {
 };
 
 ReaderState makeReaderState();
-void loadReaderBook(ReaderState& state, const EpubBook& book, const std::string& fallbackName, const AppSettings& settings);
-void loadReaderError(ReaderState& state, const std::string& bookName, const std::string& path, const std::string& error);
-void repaginateReader(ReaderState& state, const AppSettings& settings);
-void nextPage(ReaderState& state);
-void previousPage(ReaderState& state);
-void drawReader(const ReaderState& state);
+void loadReaderBook(ReaderState &state, const EpubBook &book, const std::string &fallbackName,
+                    const AppSettings &settings);
+void loadReaderError(ReaderState &state, const std::string &bookName, const std::string &path,
+                     const std::string &error);
+void repaginateReader(ReaderState &state, const AppSettings &settings);
+void nextPage(ReaderState &state);
+void previousPage(ReaderState &state);
+void drawReader(const ReaderState &state);
 
-}  // namespace nxreader
+} // namespace nxreader

@@ -21,7 +21,7 @@ constexpr int kReaderBottom = 632;
 constexpr int kSheetWidth = 426;
 constexpr float kPi = 3.1415926535f;
 constexpr const char* kDefaultFontPath = "romfs:/font.ttf";
-constexpr const char* kSoundsRoot = "sdmc:/switch/NXReader/sounds";
+constexpr const char* kBundledSoundsRoot = "romfs:/sounds";
 constexpr int kButtonIconSize = 28;
 
 enum ButtonIconId {
@@ -466,6 +466,8 @@ std::vector<unsigned char> Renderer::loadSound(const char* filename) {
     const std::vector<std::string> paths{
         std::string(kSoundsRoot) + "/" + filename,
         std::string(kSoundsRoot) + "/WAV/" + filename,
+        std::string(kBundledSoundsRoot) + "/" + filename,
+        std::string(kBundledSoundsRoot) + "/WAV/" + filename,
     };
 
     for (const std::string& path : paths) {

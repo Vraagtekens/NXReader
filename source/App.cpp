@@ -3,16 +3,16 @@
 #include "nxreader/Browser.hpp"
 #include "nxreader/Constants.hpp"
 #include "nxreader/Epub.hpp"
-#include "nxreader/Renderer.hpp"
 #include "nxreader/Reader.hpp"
+#include "nxreader/Renderer.hpp"
 #include "nxreader/Settings.hpp"
 #include "nxreader/Storage.hpp"
 #include "nxreader/Translation.hpp"
 
 #include <algorithm>
-#include <curl/curl.h>
 #include <cstdio>
 #include <cstring>
+#include <curl/curl.h>
 #include <switch.h>
 
 namespace nxreader {
@@ -52,14 +52,15 @@ bool fastTurnModifierHeld(u64 buttons) {
     return (buttons & HidNpadButton_ZL) != 0 && (buttons & HidNpadButton_ZR) != 0;
 }
 
-void clampAnnotationSelection(ReaderState& reader) {
+void clampAnnotationSelection(ReaderState &reader) {
     if (reader.annotations.empty()) {
         reader.selectedAnnotation = 0;
         reader.annotationScroll = 0;
         return;
     }
 
-    reader.selectedAnnotation = std::max(0, std::min(reader.selectedAnnotation, static_cast<int>(reader.annotations.size()) - 1));
+    reader.selectedAnnotation =
+        std::max(0, std::min(reader.selectedAnnotation, static_cast<int>(reader.annotations.size()) - 1));
     if (reader.selectedAnnotation < reader.annotationScroll) {
         reader.annotationScroll = reader.selectedAnnotation;
     }
@@ -68,9 +69,9 @@ void clampAnnotationSelection(ReaderState& reader) {
     }
 }
 
-int findAnnotationForSelection(const ReaderState& reader) {
+int findAnnotationForSelection(const ReaderState &reader) {
     for (int index = 0; index < static_cast<int>(reader.annotations.size()); ++index) {
-        const Annotation& annotation = reader.annotations[index];
+        const Annotation &annotation = reader.annotations[index];
         if (annotation.page == reader.page && annotation.text == reader.selectedText) {
             return index;
         }
@@ -78,7 +79,7 @@ int findAnnotationForSelection(const ReaderState& reader) {
     return -1;
 }
 
-Annotation& annotationForSelection(ReaderState& reader) {
+Annotation &annotationForSelection(ReaderState &reader) {
     const int existingIndex = findAnnotationForSelection(reader);
     if (existingIndex >= 0) {
         return reader.annotations[existingIndex];
@@ -93,7 +94,7 @@ Annotation& annotationForSelection(ReaderState& reader) {
     return reader.annotations.back();
 }
 
-bool showKeyboard(const char* header, const char* subText, const std::string& initialText, std::string& output) {
+bool showKeyboard(const char *header, const char *subText, const std::string &initialText, std::string &output) {
     SwkbdConfig keyboard;
     if (R_FAILED(swkbdCreate(&keyboard, 0))) {
         return false;
@@ -117,12 +118,12 @@ bool showKeyboard(const char* header, const char* subText, const std::string& in
     return true;
 }
 
-void editSelectionTranslation(ReaderState& reader) {
+void editSelectionTranslation(ReaderState &reader) {
     if (reader.selectedText.empty()) {
         return;
     }
 
-    Annotation& annotation = annotationForSelection(reader);
+    Annotation &annotation = annotationForSelection(reader);
     std::string translation;
     std::string error;
     if (translateFrenchToDutch(annotation.text, translation, error)) {
@@ -139,12 +140,12 @@ void editSelectionTranslation(ReaderState& reader) {
     }
 }
 
-void editSelectionNote(ReaderState& reader) {
+void editSelectionNote(ReaderState &reader) {
     if (reader.selectedText.empty()) {
         return;
     }
 
-    Annotation& annotation = annotationForSelection(reader);
+    Annotation &annotation = annotationForSelection(reader);
     std::string value;
     if (showKeyboard("Note", annotation.text.c_str(), annotation.note, value)) {
         annotation.note = value;
@@ -152,13 +153,14 @@ void editSelectionNote(ReaderState& reader) {
     }
 }
 
-void showReaderChromeAfterTurn(int& readerChromeFrames, const AppSettings& settings) {
+void showReaderChromeAfterTurn(int &readerChromeFrames, const AppSettings &settings) {
     if (settings.showHeaderOnTurn) {
         readerChromeFrames = kChromeVisibleFrames;
     }
 }
 
-void startPageTurnAnimation(PageTurnAnimation& animation, int fromPage, int toPage, int direction, const AppSettings& settings) {
+void startPageTurnAnimation(PageTurnAnimation &animation, int fromPage, int toPage, int direction,
+                            const AppSettings &settings) {
     if (fromPage == toPage || !settings.animatePageTurns) {
         animation.active = false;
         return;
@@ -171,14 +173,14 @@ void startPageTurnAnimation(PageTurnAnimation& animation, int fromPage, int toPa
     animation.frame = 0;
 }
 
-bool turnNextPage(ReaderState& reader, PageTurnAnimation& animation, const AppSettings& settings) {
+bool turnNextPage(ReaderState &reader, PageTurnAnimation &animation, const AppSettings &settings) {
     const int fromPage = reader.page;
     nextPage(reader);
     startPageTurnAnimation(animation, fromPage, reader.page, 1, settings);
     return reader.page != fromPage;
 }
 
-void deleteSelectedAnnotation(ReaderState& reader) {
+void deleteSelectedAnnotation(ReaderState &reader) {
     if (reader.annotations.empty()) {
         return;
     }
@@ -189,19 +191,19 @@ void deleteSelectedAnnotation(ReaderState& reader) {
     saveAnnotations(reader.bookPath.c_str(), reader.annotations);
 }
 
-bool turnPreviousPage(ReaderState& reader, PageTurnAnimation& animation, const AppSettings& settings) {
+bool turnPreviousPage(ReaderState &reader, PageTurnAnimation &animation, const AppSettings &settings) {
     const int fromPage = reader.page;
     previousPage(reader);
     startPageTurnAnimation(animation, fromPage, reader.page, -1, settings);
     return reader.page != fromPage;
 }
 
-void openSelectedEntry(BrowserState& browser, ReaderState& reader, AppMode& mode, const AppSettings& settings) {
+void openSelectedEntry(BrowserState &browser, ReaderState &reader, AppMode &mode, const AppSettings &settings) {
     if (browser.entries.empty()) {
         return;
     }
 
-    const BrowserEntry& entry = browser.entries[browser.selected];
+    const BrowserEntry &entry = browser.entries[browser.selected];
     if (entry.directory) {
         browser.currentDir = entry.path;
         browser.selected = 0;
@@ -220,7 +222,7 @@ void openSelectedEntry(BrowserState& browser, ReaderState& reader, AppMode& mode
     mode = AppMode::Reader;
 }
 
-}  // namespace
+} // namespace
 
 int runApp() {
     fsdevMountSdmc();
@@ -414,7 +416,8 @@ int runApp() {
                 shouldRedraw = true;
             } else if (showAnnotationSheet && ((buttonsDown & HidNpadButton_A) != 0) && !reader.annotations.empty()) {
                 clampAnnotationSelection(reader);
-                reader.page = std::max(1, std::min(reader.annotations[reader.selectedAnnotation].page, static_cast<int>(reader.pages.size())));
+                reader.page = std::max(1, std::min(reader.annotations[reader.selectedAnnotation].page,
+                                                   static_cast<int>(reader.pages.size())));
                 reader.selectedText = reader.annotations[reader.selectedAnnotation].text;
                 showAnnotationSheet = false;
                 handledSheetAction = true;
@@ -431,7 +434,8 @@ int runApp() {
                 settings.selectedSetting = std::max(settings.selectedSetting - 1, 0);
                 renderer.playMoveSound();
                 shouldRedraw = true;
-            } else if (showSettings && ((buttonsDown & HidNpadButton_Right) != 0 || (buttonsDown & HidNpadButton_A) != 0)) {
+            } else if (showSettings &&
+                       ((buttonsDown & HidNpadButton_Right) != 0 || (buttonsDown & HidNpadButton_A) != 0)) {
                 const AppSettings previousSettings = settings;
                 if (settings.selectedSetting == 0) {
                     settings.fontIndex = (clampFontIndex(settings.fontIndex) + 1) % settingsFontCount();
@@ -455,10 +459,12 @@ int runApp() {
                     renderer.applySettings(settings, rendererError);
                 }
                 shouldRedraw = true;
-            } else if (showSettings && ((buttonsDown & HidNpadButton_Left) != 0 || (buttonsDown & HidNpadButton_B) != 0)) {
+            } else if (showSettings &&
+                       ((buttonsDown & HidNpadButton_Left) != 0 || (buttonsDown & HidNpadButton_B) != 0)) {
                 const AppSettings previousSettings = settings;
                 if (settings.selectedSetting == 0) {
-                    settings.fontIndex = (clampFontIndex(settings.fontIndex) + settingsFontCount() - 1) % settingsFontCount();
+                    settings.fontIndex =
+                        (clampFontIndex(settings.fontIndex) + settingsFontCount() - 1) % settingsFontCount();
                 } else if (settings.selectedSetting == 1) {
                     settings.fontSize = clampFontSize(settings.fontSize - 2);
                 } else if (settings.selectedSetting == 2) {
@@ -479,8 +485,9 @@ int runApp() {
                     renderer.applySettings(settings, rendererError);
                 }
                 shouldRedraw = true;
-            } else if (!handledSheetAction && !showSettings && ((buttonsDown & HidNpadButton_A) != 0 || (buttonsDown & HidNpadButton_Right) != 0 ||
-                                         (buttonsDown & HidNpadButton_Down) != 0)) {
+            } else if (!handledSheetAction && !showSettings &&
+                       ((buttonsDown & HidNpadButton_A) != 0 || (buttonsDown & HidNpadButton_Right) != 0 ||
+                        (buttonsDown & HidNpadButton_Down) != 0)) {
                 if (!showAnnotationSheet && !reader.selectedText.empty() && (buttonsDown & HidNpadButton_A) != 0) {
                     editSelectionTranslation(reader);
                     renderer.playConfirmSound();
@@ -492,8 +499,9 @@ int runApp() {
                 }
             }
 
-            if (!handledSheetAction && !showSettings && ((buttonsDown & HidNpadButton_B) != 0 || (buttonsDown & HidNpadButton_Left) != 0 ||
-                                  (buttonsDown & HidNpadButton_Up) != 0)) {
+            if (!handledSheetAction && !showSettings &&
+                ((buttonsDown & HidNpadButton_B) != 0 || (buttonsDown & HidNpadButton_Left) != 0 ||
+                 (buttonsDown & HidNpadButton_Up) != 0)) {
                 if (!showAnnotationSheet && !reader.selectedText.empty() && (buttonsDown & HidNpadButton_B) != 0) {
                     editSelectionNote(reader);
                     renderer.playConfirmSound();
@@ -539,7 +547,7 @@ int runApp() {
             const bool isTouching = touchState.count > 0;
             const bool sheetTouching = showAnnotationSheet && isTouching && touchState.touches[0].x >= kSheetLeft;
             if (sheetTouching && !confirmDelete) {
-                const HidTouchState& touch = touchState.touches[0];
+                const HidTouchState &touch = touchState.touches[0];
                 if (!wasSheetTouching) {
                     lastSheetTouchY = touch.y;
                     const int row = (touch.y - 196) / 86;
@@ -567,9 +575,10 @@ int runApp() {
                 }
             }
             if (!showSettings && !showAnnotationSheet && isTouching && (!wasTouching || !reader.selectedText.empty())) {
-                const HidTouchState& touch = touchState.touches[0];
+                const HidTouchState &touch = touchState.touches[0];
                 pageTurnAnimation.active = false;
-                renderer.selectWordAt(reader, readerChromeFrames > 0, touch.x, touch.y, wasTouching && !reader.selectedText.empty());
+                renderer.selectWordAt(reader, readerChromeFrames > 0, touch.x, touch.y,
+                                      wasTouching && !reader.selectedText.empty());
                 if (!reader.selectedText.empty() && !wasTouching) {
                     renderer.playMoveSound();
                 }
@@ -583,24 +592,15 @@ int runApp() {
             if (mode == AppMode::Browser) {
                 renderer.drawBrowser(browser);
             } else if (pageTurnAnimation.active && !showSettings && !showAnnotationSheet) {
-                renderer.drawReaderTransition(reader,
-                                              settings,
-                                              readerChromeFrames > 0,
-                                              pageTurnAnimation.fromPage,
-                                              pageTurnAnimation.toPage,
-                                              pageTurnAnimation.direction,
-                                              pageTurnAnimation.frame,
-                                              kPageTurnFrames);
+                renderer.drawReaderTransition(reader, settings, readerChromeFrames > 0, pageTurnAnimation.fromPage,
+                                              pageTurnAnimation.toPage, pageTurnAnimation.direction,
+                                              pageTurnAnimation.frame, kPageTurnFrames);
             } else {
                 const bool sheetOpen = showSettings || showAnnotationSheet;
                 const int clampedSheetFrame = std::max(0, std::min(sheetAnimationFrame, kSheetAnimationFrames));
-                const int sheetOffset = sheetOpen ? (kSheetWidth * (kSheetAnimationFrames - clampedSheetFrame)) / kSheetAnimationFrames : 0;
-                renderer.drawReader(reader,
-                                    settings,
-                                    showSettings,
-                                    showAnnotationSheet,
-                                    confirmDelete,
-                                    sheetOffset,
+                const int sheetOffset =
+                    sheetOpen ? (kSheetWidth * (kSheetAnimationFrames - clampedSheetFrame)) / kSheetAnimationFrames : 0;
+                renderer.drawReader(reader, settings, showSettings, showAnnotationSheet, confirmDelete, sheetOffset,
                                     readerChromeFrames > 0);
             }
         }
@@ -615,4 +615,4 @@ int runApp() {
     return 0;
 }
 
-}  // namespace nxreader
+} // namespace nxreader

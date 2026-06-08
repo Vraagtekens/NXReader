@@ -1,20 +1,20 @@
 #include "nxreader/Translation.hpp"
 
 #include <algorithm>
-#include <curl/curl.h>
 #include <cstdio>
+#include <curl/curl.h>
 #include <string>
 
 namespace nxreader {
 namespace {
 
-size_t writeResponse(char* data, size_t size, size_t nmemb, void* userdata) {
-    std::string* response = static_cast<std::string*>(userdata);
+size_t writeResponse(char *data, size_t size, size_t nmemb, void *userdata) {
+    std::string *response = static_cast<std::string *>(userdata);
     response->append(data, size * nmemb);
     return size * nmemb;
 }
 
-void appendUtf8(std::string& output, unsigned int codepoint) {
+void appendUtf8(std::string &output, unsigned int codepoint) {
     if (codepoint <= 0x7f) {
         output += static_cast<char>(codepoint);
     } else if (codepoint <= 0x7ff) {
@@ -40,7 +40,7 @@ int hexValue(char value) {
     return -1;
 }
 
-std::string unescapeJsonString(const std::string& value) {
+std::string unescapeJsonString(const std::string &value) {
     std::string output;
     for (size_t index = 0; index < value.size(); ++index) {
         if (value[index] != '\\' || index + 1 >= value.size()) {
@@ -50,55 +50,55 @@ std::string unescapeJsonString(const std::string& value) {
 
         const char escaped = value[++index];
         switch (escaped) {
-            case '"':
-            case '\\':
-            case '/':
-                output += escaped;
-                break;
-            case 'b':
-                output += '\b';
-                break;
-            case 'f':
-                output += '\f';
-                break;
-            case 'n':
-                output += '\n';
-                break;
-            case 'r':
-                output += '\r';
-                break;
-            case 't':
-                output += '\t';
-                break;
-            case 'u': {
-                if (index + 4 >= value.size()) {
-                    break;
-                }
-                unsigned int codepoint = 0;
-                bool valid = true;
-                for (int offset = 0; offset < 4; ++offset) {
-                    const int digit = hexValue(value[index + 1 + offset]);
-                    if (digit < 0) {
-                        valid = false;
-                        break;
-                    }
-                    codepoint = (codepoint << 4) | static_cast<unsigned int>(digit);
-                }
-                if (valid) {
-                    appendUtf8(output, codepoint);
-                    index += 4;
-                }
+        case '"':
+        case '\\':
+        case '/':
+            output += escaped;
+            break;
+        case 'b':
+            output += '\b';
+            break;
+        case 'f':
+            output += '\f';
+            break;
+        case 'n':
+            output += '\n';
+            break;
+        case 'r':
+            output += '\r';
+            break;
+        case 't':
+            output += '\t';
+            break;
+        case 'u': {
+            if (index + 4 >= value.size()) {
                 break;
             }
-            default:
-                output += escaped;
-                break;
+            unsigned int codepoint = 0;
+            bool valid = true;
+            for (int offset = 0; offset < 4; ++offset) {
+                const int digit = hexValue(value[index + 1 + offset]);
+                if (digit < 0) {
+                    valid = false;
+                    break;
+                }
+                codepoint = (codepoint << 4) | static_cast<unsigned int>(digit);
+            }
+            if (valid) {
+                appendUtf8(output, codepoint);
+                index += 4;
+            }
+            break;
+        }
+        default:
+            output += escaped;
+            break;
         }
     }
     return output;
 }
 
-bool extractTranslatedText(const std::string& response, std::string& translation) {
+bool extractTranslatedText(const std::string &response, std::string &translation) {
     const std::string key = "\"translatedText\":\"";
     const size_t start = response.find(key);
     if (start == std::string::npos) {
@@ -122,19 +122,19 @@ bool extractTranslatedText(const std::string& response, std::string& translation
     return false;
 }
 
-}  // namespace
+} // namespace
 
-bool translateFrenchToDutch(const std::string& text, std::string& translation, std::string& error) {
+bool translateFrenchToDutch(const std::string &text, std::string &translation, std::string &error) {
     translation.clear();
     error.clear();
 
-    CURL* curl = curl_easy_init();
+    CURL *curl = curl_easy_init();
     if (curl == nullptr) {
         error = "Could not initialize curl";
         return false;
     }
 
-    char* escaped = curl_easy_escape(curl, text.c_str(), static_cast<int>(text.size()));
+    char *escaped = curl_easy_escape(curl, text.c_str(), static_cast<int>(text.size()));
     if (escaped == nullptr) {
         curl_easy_cleanup(curl);
         error = "Could not encode text";
@@ -179,4 +179,4 @@ bool translateFrenchToDutch(const std::string& text, std::string& translation, s
     return true;
 }
 
-}  // namespace nxreader
+} // namespace nxreader

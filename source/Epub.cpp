@@ -3,10 +3,10 @@
 #include "nxreader/StringUtils.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <cctype>
-#include <cstring>
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <map>
 #include <set>
 #include <string>
@@ -25,15 +25,15 @@ struct ZipEntry {
     unsigned int localHeaderOffset = 0;
 };
 
-unsigned short readU16(const unsigned char* data) {
+unsigned short readU16(const unsigned char *data) {
     return static_cast<unsigned short>(data[0] | (data[1] << 8));
 }
 
-unsigned int readU32(const unsigned char* data) {
+unsigned int readU32(const unsigned char *data) {
     return static_cast<unsigned int>(data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24));
 }
 
-bool readFileRange(FILE* file, long offset, size_t size, std::vector<unsigned char>& out) {
+bool readFileRange(FILE *file, long offset, size_t size, std::vector<unsigned char> &out) {
     out.assign(size, 0);
     if (std::fseek(file, offset, SEEK_SET) != 0) {
         return false;
@@ -42,8 +42,8 @@ bool readFileRange(FILE* file, long offset, size_t size, std::vector<unsigned ch
 }
 
 class ZipArchive {
-public:
-    bool open(const std::string& path, std::string& error) {
+  public:
+    bool open(const std::string &path, std::string &error) {
         struct stat info;
         if (stat(path.c_str(), &info) != 0) {
             error = "Could not stat EPUB path:\n" + path + "\n\n" + std::strerror(errno);
@@ -52,8 +52,9 @@ public:
 
         file_ = std::fopen(path.c_str(), "rb");
         if (file_ == nullptr) {
-            error = "Could not open EPUB file:\n" + path + "\n\nSize from stat: " +
-                    std::to_string(static_cast<long long>(info.st_size)) + " bytes\n" + std::strerror(errno);
+            error = "Could not open EPUB file:\n" + path +
+                    "\n\nSize from stat: " + std::to_string(static_cast<long long>(info.st_size)) + " bytes\n" +
+                    std::strerror(errno);
             return false;
         }
 
@@ -72,18 +73,18 @@ public:
         }
     }
 
-    bool readText(const std::string& name, std::string& text, std::string& error) {
+    bool readText(const std::string &name, std::string &text, std::string &error) {
         std::vector<unsigned char> bytes;
         if (!readBytes(name, bytes, error)) {
             return false;
         }
 
-        text.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        text.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
         return true;
     }
 
-    bool readBytes(const std::string& name, std::vector<unsigned char>& out, std::string& error) {
-        const ZipEntry* entry = findEntry(name);
+    bool readBytes(const std::string &name, std::vector<unsigned char> &out, std::string &error) {
+        const ZipEntry *entry = findEntry(name);
         if (entry == nullptr) {
             error = "Missing EPUB entry: " + name;
             return false;
@@ -139,13 +140,13 @@ public:
         return true;
     }
 
-private:
-    FILE* file_ = nullptr;
+  private:
+    FILE *file_ = nullptr;
     std::vector<ZipEntry> entries_;
 
-    const ZipEntry* findEntry(const std::string& name) const {
+    const ZipEntry *findEntry(const std::string &name) const {
         const std::string normalized = normalizeZipPath(name);
-        for (const ZipEntry& entry : entries_) {
+        for (const ZipEntry &entry : entries_) {
             if (entry.name == normalized) {
                 return &entry;
             }
@@ -153,7 +154,7 @@ private:
         return nullptr;
     }
 
-    bool readCentralDirectory(std::string& error) {
+    bool readCentralDirectory(std::string &error) {
         if (std::fseek(file_, 0, SEEK_END) != 0) {
             error = "Could not seek EPUB file.";
             return false;
@@ -180,7 +181,7 @@ private:
             return false;
         }
 
-        const unsigned char* eocd = tail.data() + (eocdOffset - (fileSize - searchSize));
+        const unsigned char *eocd = tail.data() + (eocdOffset - (fileSize - searchSize));
         const unsigned short entryCount = readU16(eocd + 10);
         const unsigned int centralOffset = readU32(eocd + 16);
 
@@ -208,7 +209,7 @@ private:
             }
 
             ZipEntry entry;
-            entry.name.assign(reinterpret_cast<const char*>(nameBytes.data()), nameBytes.size());
+            entry.name.assign(reinterpret_cast<const char *>(nameBytes.data()), nameBytes.size());
             entry.method = readU16(header + 10);
             entry.compressedSize = readU32(header + 20);
             entry.uncompressedSize = readU32(header + 24);
@@ -225,7 +226,7 @@ private:
     }
 };
 
-std::string attrValue(const std::string& xml, size_t tagStart, const std::string& attrName) {
+std::string attrValue(const std::string &xml, size_t tagStart, const std::string &attrName) {
     const size_t tagEnd = xml.find('>', tagStart);
     if (tagEnd == std::string::npos) {
         return "";
@@ -262,14 +263,15 @@ std::string attrValue(const std::string& xml, size_t tagStart, const std::string
     }
 
     const size_t contentStart = cursor;
-    while (cursor < tagEnd && !std::isspace(static_cast<unsigned char>(xml[cursor])) && xml[cursor] != '/' && xml[cursor] != '>') {
+    while (cursor < tagEnd && !std::isspace(static_cast<unsigned char>(xml[cursor])) && xml[cursor] != '/' &&
+           xml[cursor] != '>') {
         cursor += 1;
     }
 
     return xml.substr(contentStart, cursor - contentStart);
 }
 
-std::string firstTagText(const std::string& xml, const std::string& tagName) {
+std::string firstTagText(const std::string &xml, const std::string &tagName) {
     const size_t startTag = xml.find("<" + tagName);
     if (startTag == std::string::npos) {
         return "";
@@ -288,14 +290,12 @@ std::string firstTagText(const std::string& xml, const std::string& tagName) {
     return stripTagsToText(xml.substr(startClose + 1, endTag - startClose - 1));
 }
 
-std::string findRootfilePath(const std::string& containerXml) {
+std::string findRootfilePath(const std::string &containerXml) {
     size_t cursor = 0;
     while ((cursor = containerXml.find("<rootfile", cursor)) != std::string::npos) {
         const size_t afterName = cursor + std::strlen("<rootfile");
-        if (afterName < containerXml.size() &&
-            (std::isspace(static_cast<unsigned char>(containerXml[afterName])) ||
-             containerXml[afterName] == '/' ||
-             containerXml[afterName] == '>')) {
+        if (afterName < containerXml.size() && (std::isspace(static_cast<unsigned char>(containerXml[afterName])) ||
+                                                containerXml[afterName] == '/' || containerXml[afterName] == '>')) {
             return attrValue(containerXml, cursor, "full-path");
         }
         cursor = afterName;
@@ -303,15 +303,15 @@ std::string findRootfilePath(const std::string& containerXml) {
     return "";
 }
 
-bool isImageMediaType(const std::string& mediaType) {
+bool isImageMediaType(const std::string &mediaType) {
     return mediaType.rfind("image/", 0) == 0;
 }
 
-std::string imageMarker(const std::string& imagePath) {
+std::string imageMarker(const std::string &imagePath) {
     return "<br/>[[NXREADER_IMAGE:" + imagePath + "]]<br/>";
 }
 
-std::string htmlWithImageMarkers(const std::string& html, const std::string& chapterPath) {
+std::string htmlWithImageMarkers(const std::string &html, const std::string &chapterPath) {
     std::string out;
     const std::string chapterDir = directoryName(chapterPath);
     size_t cursor = 0;
@@ -340,8 +340,8 @@ std::string htmlWithImageMarkers(const std::string& html, const std::string& cha
     return out;
 }
 
-void addImageIfReadable(ZipArchive& zip, EpubBook& book, std::set<std::string>& seenImages, const std::string& href,
-                        const std::string& mediaType) {
+void addImageIfReadable(ZipArchive &zip, EpubBook &book, std::set<std::string> &seenImages, const std::string &href,
+                        const std::string &mediaType) {
     if (href.empty() || seenImages.find(href) != seenImages.end()) {
         return;
     }
@@ -356,10 +356,10 @@ void addImageIfReadable(ZipArchive& zip, EpubBook& book, std::set<std::string>& 
     }
 }
 
-std::vector<std::string> extractImageMarkers(const std::string& text) {
+std::vector<std::string> extractImageMarkers(const std::string &text) {
     std::vector<std::string> paths;
     size_t cursor = 0;
-    constexpr const char* marker = "[[NXREADER_IMAGE:";
+    constexpr const char *marker = "[[NXREADER_IMAGE:";
     constexpr size_t markerLength = 17;
 
     while ((cursor = text.find(marker, cursor)) != std::string::npos) {
@@ -375,9 +375,9 @@ std::vector<std::string> extractImageMarkers(const std::string& text) {
     return paths;
 }
 
-}  // namespace
+} // namespace
 
-bool loadEpub(const std::string& path, EpubBook& book, std::string& error) {
+bool loadEpub(const std::string &path, EpubBook &book, std::string &error) {
     book = {};
     book.path = path;
 
@@ -395,8 +395,7 @@ bool loadEpub(const std::string& path, EpubBook& book, std::string& error) {
     const std::string opfPath = findRootfilePath(containerXml);
     if (opfPath.empty()) {
         zip.close();
-        error = "EPUB container.xml did not contain a rootfile path.\n\nPreview:\n" +
-                containerXml.substr(0, 500);
+        error = "EPUB container.xml did not contain a rootfile path.\n\nPreview:\n" + containerXml.substr(0, 500);
         return false;
     }
 
@@ -442,19 +441,17 @@ bool loadEpub(const std::string& path, EpubBook& book, std::string& error) {
 
     const std::string opfDir = directoryName(opfPath);
     std::set<std::string> seenImages;
-    const ManifestItem* coverItem = nullptr;
-    for (const auto& pair : manifest) {
-        const ManifestItem& item = pair.second;
+    const ManifestItem *coverItem = nullptr;
+    for (const auto &pair : manifest) {
+        const ManifestItem &item = pair.second;
         if (!isImageMediaType(item.mediaType)) {
             continue;
         }
 
         const std::string lowerId = lowerCopy(item.id);
         const std::string lowerHref = lowerCopy(item.href);
-        if ((!coverId.empty() && item.id == coverId) ||
-            item.properties.find("cover-image") != std::string::npos ||
-            lowerId.find("cover") != std::string::npos ||
-            lowerHref.find("cover") != std::string::npos) {
+        if ((!coverId.empty() && item.id == coverId) || item.properties.find("cover-image") != std::string::npos ||
+            lowerId.find("cover") != std::string::npos || lowerHref.find("cover") != std::string::npos) {
             coverItem = &item;
             break;
         }
@@ -476,7 +473,7 @@ bool loadEpub(const std::string& path, EpubBook& book, std::string& error) {
         const std::string idref = attrValue(opfXml, itemRefStart, "idref");
         const auto found = manifest.find(idref);
         if (found != manifest.end()) {
-            const ManifestItem& item = found->second;
+            const ManifestItem &item = found->second;
             if (item.mediaType.find("html") != std::string::npos || endsWithIgnoreCase(item.href, ".xhtml")) {
                 const std::string chapterPath = normalizeZipPath(joinPath(opfDir, item.href));
                 std::string html;
@@ -485,10 +482,10 @@ bool loadEpub(const std::string& path, EpubBook& book, std::string& error) {
                 chapter.mediaType = item.mediaType;
                 if (zip.readText(chapterPath, html, error)) {
                     chapter.text = stripTagsToText(htmlWithImageMarkers(html, chapterPath));
-                    for (const std::string& imagePath : extractImageMarkers(chapter.text)) {
+                    for (const std::string &imagePath : extractImageMarkers(chapter.text)) {
                         std::string mediaType;
-                        for (const auto& pair : manifest) {
-                            const ManifestItem& manifestItem = pair.second;
+                        for (const auto &pair : manifest) {
+                            const ManifestItem &manifestItem = pair.second;
                             const std::string manifestPath = normalizeZipPath(joinPath(opfDir, manifestItem.href));
                             if (manifestPath == imagePath) {
                                 mediaType = manifestItem.mediaType;
@@ -518,4 +515,4 @@ bool loadEpub(const std::string& path, EpubBook& book, std::string& error) {
     return true;
 }
 
-}  // namespace nxreader
+} // namespace nxreader

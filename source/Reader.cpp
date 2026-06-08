@@ -11,14 +11,14 @@ namespace nxreader {
 namespace {
 
 constexpr int kReaderColumns = 72;
-constexpr const char* kCoverPageMarker = "[[NXREADER_COVER]]";
-constexpr const char* kImagePageMarker = "[[NXREADER_IMAGE:";
+constexpr const char *kCoverPageMarker = "[[NXREADER_COVER]]";
+constexpr const char *kImagePageMarker = "[[NXREADER_IMAGE:";
 
-int pageCount(const ReaderState& state) {
+int pageCount(const ReaderState &state) {
     return std::max(1, static_cast<int>(state.pages.size()));
 }
 
-int linesPerPageForSettings(const AppSettings& settings) {
+int linesPerPageForSettings(const AppSettings &settings) {
     if (settings.fontSize >= 36) {
         return 8;
     }
@@ -34,11 +34,11 @@ int linesPerPageForSettings(const AppSettings& settings) {
     return 15;
 }
 
-int columnsForSettings(const AppSettings& settings) {
+int columnsForSettings(const AppSettings &settings) {
     return std::max(48, kReaderColumns - (settings.fontSize - 28));
 }
 
-void clearSelection(ReaderState& state) {
+void clearSelection(ReaderState &state) {
     state.selectedText.clear();
     state.selectedX = 0;
     state.selectedY = 0;
@@ -49,14 +49,14 @@ void clearSelection(ReaderState& state) {
     state.selectedRects.clear();
 }
 
-std::vector<std::string> paginateForViewport(const std::string& text, const AppSettings& settings) {
+std::vector<std::string> paginateForViewport(const std::string &text, const AppSettings &settings) {
     const std::vector<std::string> lines = wrapTextLines(text, columnsForSettings(settings));
     std::vector<std::string> pages;
     std::string page;
     int usedLines = 0;
     const int linesPerPage = linesPerPageForSettings(settings);
 
-    for (const std::string& line : lines) {
+    for (const std::string &line : lines) {
         const bool heading = line.rfind("## ", 0) == 0;
         const bool image = line.rfind(kImagePageMarker, 0) == 0;
         const int lineCost = image ? 10 : (line.empty() ? 1 : (heading ? 2 : 1));
@@ -83,7 +83,7 @@ std::vector<std::string> paginateForViewport(const std::string& text, const AppS
     return pages;
 }
 
-}  // namespace
+} // namespace
 
 ReaderState makeReaderState() {
     ReaderState state;
@@ -91,7 +91,8 @@ ReaderState makeReaderState() {
     return state;
 }
 
-void loadReaderBook(ReaderState& state, const EpubBook& book, const std::string& fallbackName, const AppSettings& settings) {
+void loadReaderBook(ReaderState &state, const EpubBook &book, const std::string &fallbackName,
+                    const AppSettings &settings) {
     state.bookName = book.title.empty() ? fallbackName : book.title;
     state.bookPath = book.path;
     state.darkMode = settings.darkMode;
@@ -105,7 +106,7 @@ void loadReaderBook(ReaderState& state, const EpubBook& book, const std::string&
     state.chapterTexts.clear();
     state.pages.clear();
 
-    for (const EpubChapter& chapter : book.chapters) {
+    for (const EpubChapter &chapter : book.chapters) {
         state.chapterTexts.push_back(chapter.text);
     }
 
@@ -114,7 +115,8 @@ void loadReaderBook(ReaderState& state, const EpubBook& book, const std::string&
     state.annotations = loadAnnotations(state.bookPath.c_str());
 }
 
-void loadReaderError(ReaderState& state, const std::string& bookName, const std::string& path, const std::string& error) {
+void loadReaderError(ReaderState &state, const std::string &bookName, const std::string &path,
+                     const std::string &error) {
     state.bookName = bookName;
     state.bookPath = path;
     state.loadError = error;
@@ -130,11 +132,11 @@ void loadReaderError(ReaderState& state, const std::string& bookName, const std:
     state.page = 1;
 }
 
-void repaginateReader(ReaderState& state, const AppSettings& settings) {
+void repaginateReader(ReaderState &state, const AppSettings &settings) {
     const int oldPage = state.page;
     std::vector<std::string> allPages;
 
-    for (const std::string& chapterText : state.chapterTexts) {
+    for (const std::string &chapterText : state.chapterTexts) {
         std::vector<std::string> chapterPages = paginateForViewport(chapterText, settings);
         allPages.insert(allPages.end(), chapterPages.begin(), chapterPages.end());
     }
@@ -146,7 +148,7 @@ void repaginateReader(ReaderState& state, const AppSettings& settings) {
     state.page = std::max(1, std::min(oldPage, pageCount(state)));
 }
 
-void nextPage(ReaderState& state) {
+void nextPage(ReaderState &state) {
     if (state.page < pageCount(state)) {
         state.page += 1;
         clearSelection(state);
@@ -154,7 +156,7 @@ void nextPage(ReaderState& state) {
     }
 }
 
-void previousPage(ReaderState& state) {
+void previousPage(ReaderState &state) {
     if (state.page > 1) {
         state.page -= 1;
         clearSelection(state);
@@ -162,7 +164,7 @@ void previousPage(ReaderState& state) {
     }
 }
 
-void drawReader(const ReaderState& state) {
+void drawReader(const ReaderState &state) {
     consoleClear();
 
     std::printf("NXReader - Reading\n");
@@ -190,4 +192,4 @@ void drawReader(const ReaderState& state) {
     consoleUpdate(nullptr);
 }
 
-}  // namespace nxreader
+} // namespace nxreader

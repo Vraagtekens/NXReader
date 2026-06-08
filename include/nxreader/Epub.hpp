@@ -25,6 +25,6 @@ struct EpubBook {
     std::vector<EpubChapter> chapters;
 };
 
-bool loadEpub(const std::string& path, EpubBook& book, std::string& error);
+bool loadEpub(const std::string &path, EpubBook &book, std::string &error);
 
-}  // namespace nxreader
+} // namespace nxreader

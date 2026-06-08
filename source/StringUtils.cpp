@@ -9,13 +9,12 @@
 namespace nxreader {
 
 std::string lowerCopy(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     return value;
 }
 
-bool endsWithIgnoreCase(const std::string& value, const std::string& suffix) {
+bool endsWithIgnoreCase(const std::string &value, const std::string &suffix) {
     if (value.size() < suffix.size()) {
         return false;
     }
@@ -23,7 +22,7 @@ bool endsWithIgnoreCase(const std::string& value, const std::string& suffix) {
     return lowerCopy(value).compare(value.size() - suffix.size(), suffix.size(), lowerCopy(suffix)) == 0;
 }
 
-std::string directoryName(const std::string& path) {
+std::string directoryName(const std::string &path) {
     const size_t slash = path.find_last_of('/');
     if (slash == std::string::npos) {
         return "";
@@ -31,7 +30,7 @@ std::string directoryName(const std::string& path) {
     return path.substr(0, slash);
 }
 
-std::string fileName(const std::string& path) {
+std::string fileName(const std::string &path) {
     const size_t slash = path.find_last_of('/');
     if (slash == std::string::npos) {
         return path;
@@ -39,7 +38,7 @@ std::string fileName(const std::string& path) {
     return path.substr(slash + 1);
 }
 
-std::string joinPath(const std::string& dir, const std::string& name) {
+std::string joinPath(const std::string &dir, const std::string &name) {
     if (dir.empty()) {
         return name;
     }
@@ -49,7 +48,7 @@ std::string joinPath(const std::string& dir, const std::string& name) {
     return dir + "/" + name;
 }
 
-std::string normalizeZipPath(const std::string& path) {
+std::string normalizeZipPath(const std::string &path) {
     std::vector<std::string> parts;
     size_t start = 0;
 
@@ -103,71 +102,19 @@ std::string utf8FromCodepoint(unsigned int codepoint) {
     return out;
 }
 
-std::string namedEntityValue(const std::string& name) {
+std::string namedEntityValue(const std::string &name) {
     static const std::map<std::string, std::string> entities = {
-        {"amp", "&"},
-        {"apos", "'"},
-        {"quot", "\""},
-        {"lt", "<"},
-        {"gt", ">"},
-        {"nbsp", " "},
-        {"copy", "(c)"},
-        {"reg", "(r)"},
-        {"hellip", "..."},
-        {"ndash", "-"},
-        {"mdash", "-"},
-        {"lsquo", "'"},
-        {"rsquo", "'"},
-        {"ldquo", "\""},
-        {"rdquo", "\""},
-        {"laquo", "«"},
-        {"raquo", "»"},
-        {"Agrave", "À"},
-        {"Aacute", "Á"},
-        {"Acirc", "Â"},
-        {"Auml", "Ä"},
-        {"Ccedil", "Ç"},
-        {"Egrave", "È"},
-        {"Eacute", "É"},
-        {"Ecirc", "Ê"},
-        {"Euml", "Ë"},
-        {"Igrave", "Ì"},
-        {"Iacute", "Í"},
-        {"Icirc", "Î"},
-        {"Iuml", "Ï"},
-        {"Ograve", "Ò"},
-        {"Oacute", "Ó"},
-        {"Ocirc", "Ô"},
-        {"Ouml", "Ö"},
-        {"Ugrave", "Ù"},
-        {"Uacute", "Ú"},
-        {"Ucirc", "Û"},
-        {"Uuml", "Ü"},
-        {"agrave", "à"},
-        {"aacute", "á"},
-        {"acirc", "â"},
-        {"auml", "ä"},
-        {"ccedil", "ç"},
-        {"egrave", "è"},
-        {"eacute", "é"},
-        {"ecirc", "ê"},
-        {"euml", "ë"},
-        {"igrave", "ì"},
-        {"iacute", "í"},
-        {"icirc", "î"},
-        {"iuml", "ï"},
-        {"ograve", "ò"},
-        {"oacute", "ó"},
-        {"ocirc", "ô"},
-        {"ouml", "ö"},
-        {"ugrave", "ù"},
-        {"uacute", "ú"},
-        {"ucirc", "û"},
-        {"uuml", "ü"},
-        {"yuml", "ÿ"},
-        {"oelig", "œ"},
-        {"OElig", "Œ"},
-        {"euro", "€"},
+        {"amp", "&"},    {"apos", "'"},   {"quot", "\""},    {"lt", "<"},     {"gt", ">"},     {"nbsp", " "},
+        {"copy", "(c)"}, {"reg", "(r)"},  {"hellip", "..."}, {"ndash", "-"},  {"mdash", "-"},  {"lsquo", "'"},
+        {"rsquo", "'"},  {"ldquo", "\""}, {"rdquo", "\""},   {"laquo", "«"},  {"raquo", "»"},  {"Agrave", "À"},
+        {"Aacute", "Á"}, {"Acirc", "Â"},  {"Auml", "Ä"},     {"Ccedil", "Ç"}, {"Egrave", "È"}, {"Eacute", "É"},
+        {"Ecirc", "Ê"},  {"Euml", "Ë"},   {"Igrave", "Ì"},   {"Iacute", "Í"}, {"Icirc", "Î"},  {"Iuml", "Ï"},
+        {"Ograve", "Ò"}, {"Oacute", "Ó"}, {"Ocirc", "Ô"},    {"Ouml", "Ö"},   {"Ugrave", "Ù"}, {"Uacute", "Ú"},
+        {"Ucirc", "Û"},  {"Uuml", "Ü"},   {"agrave", "à"},   {"aacute", "á"}, {"acirc", "â"},  {"auml", "ä"},
+        {"ccedil", "ç"}, {"egrave", "è"}, {"eacute", "é"},   {"ecirc", "ê"},  {"euml", "ë"},   {"igrave", "ì"},
+        {"iacute", "í"}, {"icirc", "î"},  {"iuml", "ï"},     {"ograve", "ò"}, {"oacute", "ó"}, {"ocirc", "ô"},
+        {"ouml", "ö"},   {"ugrave", "ù"}, {"uacute", "ú"},   {"ucirc", "û"},  {"uuml", "ü"},   {"yuml", "ÿ"},
+        {"oelig", "œ"},  {"OElig", "Œ"},  {"euro", "€"},
     };
 
     const auto found = entities.find(name);
@@ -177,7 +124,7 @@ std::string namedEntityValue(const std::string& name) {
     return found->second;
 }
 
-std::string removeTagBlock(std::string html, const std::string& tagName) {
+std::string removeTagBlock(std::string html, const std::string &tagName) {
     const std::string openNeedle = "<" + tagName;
     const std::string closeNeedle = "</" + tagName + ">";
     std::string lower = lowerCopy(html);
@@ -198,18 +145,18 @@ std::string removeTagBlock(std::string html, const std::string& tagName) {
     return html;
 }
 
-bool isHeadingTag(const std::string& tag) {
+bool isHeadingTag(const std::string &tag) {
     return tag == "h1" || tag == "h2" || tag == "h3" || tag == "h4" || tag == "h5" || tag == "h6";
 }
 
-void appendSpace(std::string& text, bool& lastWasSpace) {
+void appendSpace(std::string &text, bool &lastWasSpace) {
     if (!text.empty() && !lastWasSpace && text[text.size() - 1] != '\n') {
         text += ' ';
         lastWasSpace = true;
     }
 }
 
-void appendBreak(std::string& text, int count, bool& lastWasSpace) {
+void appendBreak(std::string &text, int count, bool &lastWasSpace) {
     while (!text.empty() && text[text.size() - 1] == ' ') {
         text.pop_back();
     }
@@ -225,9 +172,9 @@ void appendBreak(std::string& text, int count, bool& lastWasSpace) {
     lastWasSpace = true;
 }
 
-}  // namespace
+} // namespace
 
-std::string decodeHtmlEntities(const std::string& text) {
+std::string decodeHtmlEntities(const std::string &text) {
     std::string decoded;
     for (size_t index = 0; index < text.size(); ++index) {
         if (text[index] != '&') {
@@ -246,8 +193,8 @@ std::string decodeHtmlEntities(const std::string& text) {
 
         if (!entity.empty() && entity[0] == '#') {
             const bool hex = entity.size() > 2 && (entity[1] == 'x' || entity[1] == 'X');
-            const char* numberStart = entity.c_str() + (hex ? 2 : 1);
-            char* numberEnd = nullptr;
+            const char *numberStart = entity.c_str() + (hex ? 2 : 1);
+            char *numberEnd = nullptr;
             const unsigned long codepoint = std::strtoul(numberStart, &numberEnd, hex ? 16 : 10);
             if (numberEnd != numberStart) {
                 replacement = utf8FromCodepoint(static_cast<unsigned int>(codepoint));
@@ -269,7 +216,7 @@ std::string decodeHtmlEntities(const std::string& text) {
     return decoded;
 }
 
-std::string consoleSafeText(const std::string& text) {
+std::string consoleSafeText(const std::string &text) {
     std::string out;
     for (size_t index = 0; index < text.size();) {
         const unsigned char ch = static_cast<unsigned char>(text[index]);
@@ -283,7 +230,7 @@ std::string consoleSafeText(const std::string& text) {
         const std::string remaining = text.substr(index, std::min<size_t>(4, text.size() - index));
         size_t consumed = 1;
 
-        const auto replace2 = [&](const char* utf8, const char* ascii) {
+        const auto replace2 = [&](const char *utf8, const char *ascii) {
             if (text.compare(index, std::strlen(utf8), utf8) == 0) {
                 replacement = ascii;
                 consumed = std::strlen(utf8);
@@ -294,15 +241,13 @@ std::string consoleSafeText(const std::string& text) {
 
         if (replace2("à", "a") || replace2("á", "a") || replace2("â", "a") || replace2("ä", "a") ||
             replace2("À", "A") || replace2("Á", "A") || replace2("Â", "A") || replace2("Ä", "A") ||
-            replace2("ç", "c") || replace2("Ç", "C") ||
-            replace2("è", "e") || replace2("é", "e") || replace2("ê", "e") || replace2("ë", "e") ||
-            replace2("È", "E") || replace2("É", "E") || replace2("Ê", "E") || replace2("Ë", "E") ||
-            replace2("î", "i") || replace2("ï", "i") || replace2("Î", "I") || replace2("Ï", "I") ||
-            replace2("ô", "o") || replace2("ö", "o") || replace2("Ô", "O") || replace2("Ö", "O") ||
-            replace2("ù", "u") || replace2("û", "u") || replace2("ü", "u") ||
-            replace2("Ù", "U") || replace2("Û", "U") || replace2("Ü", "U") ||
-            replace2("œ", "oe") || replace2("Œ", "OE") ||
-            replace2("«", "\"") || replace2("»", "\"") ||
+            replace2("ç", "c") || replace2("Ç", "C") || replace2("è", "e") || replace2("é", "e") ||
+            replace2("ê", "e") || replace2("ë", "e") || replace2("È", "E") || replace2("É", "E") ||
+            replace2("Ê", "E") || replace2("Ë", "E") || replace2("î", "i") || replace2("ï", "i") ||
+            replace2("Î", "I") || replace2("Ï", "I") || replace2("ô", "o") || replace2("ö", "o") ||
+            replace2("Ô", "O") || replace2("Ö", "O") || replace2("ù", "u") || replace2("û", "u") ||
+            replace2("ü", "u") || replace2("Ù", "U") || replace2("Û", "U") || replace2("Ü", "U") ||
+            replace2("œ", "oe") || replace2("Œ", "OE") || replace2("«", "\"") || replace2("»", "\"") ||
             replace2("–", "-") || replace2("—", "-") || replace2("’", "'") || replace2("“", "\"") ||
             replace2("”", "\"")) {
             out += replacement;
@@ -317,7 +262,7 @@ std::string consoleSafeText(const std::string& text) {
     return out;
 }
 
-std::string stripTagsToText(const std::string& html) {
+std::string stripTagsToText(const std::string &html) {
     std::string cleaned = removeTagBlock(html, "style");
     cleaned = removeTagBlock(cleaned, "script");
 
@@ -384,7 +329,7 @@ std::string stripTagsToText(const std::string& html) {
     return decodeHtmlEntities(text);
 }
 
-std::vector<std::string> paginateText(const std::string& text, size_t charsPerPage) {
+std::vector<std::string> paginateText(const std::string &text, size_t charsPerPage) {
     std::vector<std::string> pages;
     size_t start = 0;
 
@@ -411,7 +356,7 @@ std::vector<std::string> paginateText(const std::string& text, size_t charsPerPa
     return pages;
 }
 
-std::vector<std::string> wrapTextLines(const std::string& text, size_t maxColumns) {
+std::vector<std::string> wrapTextLines(const std::string &text, size_t maxColumns) {
     std::vector<std::string> lines;
     size_t lineStart = 0;
 
@@ -454,4 +399,4 @@ std::vector<std::string> wrapTextLines(const std::string& text, size_t maxColumn
     return lines;
 }
 
-}  // namespace nxreader
+} // namespace nxreader

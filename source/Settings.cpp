@@ -19,7 +19,19 @@ int clampFontIndex(int fontIndex) {
 
 namespace {
 
-bool hasFontExtension(const char* name, const char* extension) {
+struct BundledFont {
+    const char *name;
+    const char *path;
+};
+
+constexpr BundledFont kBundledFonts[] = {
+    {"Atkinson Hyperlegible", "romfs:/fonts/AtkinsonHyperlegible-Regular.ttf"},
+    {"Lexend", "romfs:/fonts/Lexend-Regular.ttf"},
+    {"OpenDyslexic", "romfs:/fonts/opendyslexic-regular-webfont.ttf"},
+};
+constexpr int kBundledFontCount = sizeof(kBundledFonts) / sizeof(kBundledFonts[0]);
+
+bool hasFontExtension(const char *name, const char *extension) {
     const size_t nameLength = std::strlen(name);
     const size_t extensionLength = std::strlen(extension);
     if (nameLength < extensionLength) {
@@ -29,18 +41,19 @@ bool hasFontExtension(const char* name, const char* extension) {
     return strcasecmp(name + nameLength - extensionLength, extension) == 0;
 }
 
-void collectFonts(const std::string& directory, int depth, std::vector<std::string>& preferredFonts, std::vector<std::string>& fallbackFonts) {
+void collectFonts(const std::string &directory, int depth, std::vector<std::string> &preferredFonts,
+                  std::vector<std::string> &fallbackFonts) {
     if (depth > 3) {
         return;
     }
 
-    DIR* dir = opendir(directory.c_str());
+    DIR *dir = opendir(directory.c_str());
     if (dir == nullptr) {
         return;
     }
 
-    while (dirent* entry = readdir(dir)) {
-        const char* name = entry->d_name;
+    while (dirent *entry = readdir(dir)) {
+        const char *name = entry->d_name;
         if (std::strcmp(name, ".") == 0 || std::strcmp(name, "..") == 0 || name[0] == '.') {
             continue;
         }
@@ -68,7 +81,7 @@ std::vector<std::string> customFontPaths() {
     return preferredFonts;
 }
 
-std::string filenameFromPath(const std::string& path) {
+std::string filenameFromPath(const std::string &path) {
     const size_t slash = path.find_last_of('/');
     if (slash == std::string::npos) {
         return path;
@@ -76,7 +89,7 @@ std::string filenameFromPath(const std::string& path) {
     return path.substr(slash + 1);
 }
 
-std::string fontNameFromPath(const std::string& path) {
+std::string fontNameFromPath(const std::string &path) {
     std::string name = filenameFromPath(path);
     const size_t dot = name.find_last_of('.');
     if (dot != std::string::npos) {
@@ -85,24 +98,20 @@ std::string fontNameFromPath(const std::string& path) {
     return name;
 }
 
-}  // namespace
+} // namespace
 
 int settingsFontCount() {
-    return 2 + static_cast<int>(customFontPaths().size());
+    return kBundledFontCount + static_cast<int>(customFontPaths().size());
 }
 
 std::string settingsFontName(int fontIndex) {
-    switch (clampFontIndex(fontIndex)) {
-        case 1:
-            return "Noto Serif";
-        case 0:
-            return "Noto Sans";
-        default:
-            break;
+    const int clampedIndex = clampFontIndex(fontIndex);
+    if (clampedIndex < kBundledFontCount) {
+        return kBundledFonts[clampedIndex].name;
     }
 
     const std::vector<std::string> customFonts = customFontPaths();
-    const int customIndex = clampFontIndex(fontIndex) - 2;
+    const int customIndex = clampedIndex - kBundledFontCount;
     if (customIndex >= 0 && customIndex < static_cast<int>(customFonts.size())) {
         return fontNameFromPath(customFonts[customIndex]);
     }
@@ -110,21 +119,17 @@ std::string settingsFontName(int fontIndex) {
 }
 
 std::string settingsFontPath(int fontIndex) {
-    switch (clampFontIndex(fontIndex)) {
-        case 1:
-            return "romfs:/serif.ttf";
-        case 0:
-            return "romfs:/font.ttf";
-        default:
-            break;
+    const int clampedIndex = clampFontIndex(fontIndex);
+    if (clampedIndex < kBundledFontCount) {
+        return kBundledFonts[clampedIndex].path;
     }
 
     const std::vector<std::string> customFonts = customFontPaths();
-    const int customIndex = clampFontIndex(fontIndex) - 2;
+    const int customIndex = clampedIndex - kBundledFontCount;
     if (customIndex >= 0 && customIndex < static_cast<int>(customFonts.size())) {
         return customFonts[customIndex];
     }
     return "romfs:/font.ttf";
 }
 
-}  // namespace nxreader
+} // namespace nxreader
