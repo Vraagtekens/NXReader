@@ -5,7 +5,7 @@ libnx, SDL2, SDL2_ttf, and devkitPro.
 
 This first version is intentionally small: it builds a `.nro`, browses `.epub`
 files from the SD card, extracts basic EPUB text, renders it with a bundled
-TrueType fonts, supports button and touch page turns, toggles a dark-mode flag,
+TrueType fonts, supports button page turns and touch word selection, toggles a dark-mode flag,
 and saves the last page per book to the SD card.
 
 ## Planned App Features
@@ -14,7 +14,7 @@ and saves the last page per book to the SD card.
 - EPUB loading and chapter navigation
 - Save last page per book
 - Dark mode
-- Touch page turning and button controls
+- Touch word selection and button controls
 
 ## Requirements
 
@@ -25,6 +25,7 @@ sudo dkp-pacman -S switch-dev
 sudo dkp-pacman -S switch-zlib
 sudo dkp-pacman -S switch-sdl2 switch-sdl2_ttf
 sudo dkp-pacman -S switch-sdl2_image
+sudo dkp-pacman -S switch-curl
 ```
 
 Make sure these environment variables are available in your shell:
@@ -98,18 +99,28 @@ Reader:
 
 - `A`, D-Pad Right, or D-Pad Down: next page
 - `B`, D-Pad Left, or D-Pad Up: previous page
-- `X`: toggle the dark-mode flag
+- `X`: open notes/translations sheet
 - `Y`: open reading settings
 - `-`: back to browser
 - `+`: exit
-- Touch the left or right side of the screen to turn pages
+- Touch a word to select it
+- With text selected, `A`: translate French to Dutch with MyMemory and save it
+- With text selected, `B`: add/edit a note with the Switch keyboard
 - Hold `ZL` + `ZR`, then hold D-Pad Left or Right to skim through pages
+
+Notes/translations sheet:
+
+- `X`: close sheet
+- D-Pad Up/Down or touch-drag: move through saved items
+- `A`: jump to selected item
+- `-`: ask to delete selected item
+- In delete dialog, `A`: delete and `B`: cancel
 
 Chapters start on a new reader page. Page counts are generated from wrapped
 reader text, so changing font size or margins will change the total page count.
 The reader header appears when opening a book or pressing a reader button, then
 auto-hides after a short moment. This page-turn header behavior can be disabled
-in reading settings.
+in reading settings. Page slide animation can also be disabled there.
 
 Reading settings:
 
@@ -117,6 +128,8 @@ Reading settings:
 - D-Pad Up/Down: choose setting
 - D-Pad Right or `A`: increase/change selected setting
 - D-Pad Left or `B`: decrease/change selected setting
+
+Theme is changed in reading settings.
 
 Font size is saved to `sdmc:/switch/NXReader/settings.txt`. The app bundles
 Noto Sans and Noto Serif. Every `.ttf` or `.otf` font found under this folder is

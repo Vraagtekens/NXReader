@@ -20,22 +20,33 @@ int pageCount(const ReaderState& state) {
 
 int linesPerPageForSettings(const AppSettings& settings) {
     if (settings.fontSize >= 36) {
-        return 10;
+        return 8;
     }
     if (settings.fontSize >= 32) {
-        return 12;
+        return 10;
     }
     if (settings.fontSize >= 28) {
-        return 14;
+        return 12;
     }
     if (settings.fontSize >= 24) {
-        return 16;
+        return 14;
     }
-    return 18;
+    return 15;
 }
 
 int columnsForSettings(const AppSettings& settings) {
     return std::max(48, kReaderColumns - (settings.fontSize - 28));
+}
+
+void clearSelection(ReaderState& state) {
+    state.selectedText.clear();
+    state.selectedX = 0;
+    state.selectedY = 0;
+    state.selectedW = 0;
+    state.selectedH = 0;
+    state.selectionAnchor = -1;
+    state.selectionFocus = -1;
+    state.selectedRects.clear();
 }
 
 std::vector<std::string> paginateForViewport(const std::string& text, const AppSettings& settings) {
@@ -83,8 +94,13 @@ ReaderState makeReaderState() {
 void loadReaderBook(ReaderState& state, const EpubBook& book, const std::string& fallbackName, const AppSettings& settings) {
     state.bookName = book.title.empty() ? fallbackName : book.title;
     state.bookPath = book.path;
+    state.darkMode = settings.darkMode;
     state.loadError.clear();
     state.coverImage = book.coverImage;
+    clearSelection(state);
+    state.annotations.clear();
+    state.selectedAnnotation = 0;
+    state.annotationScroll = 0;
     state.images = book.images;
     state.chapterTexts.clear();
     state.pages.clear();
@@ -95,6 +111,7 @@ void loadReaderBook(ReaderState& state, const EpubBook& book, const std::string&
 
     repaginateReader(state, settings);
     state.page = loadLastPage(state.bookPath.c_str(), pageCount(state));
+    state.annotations = loadAnnotations(state.bookPath.c_str());
 }
 
 void loadReaderError(ReaderState& state, const std::string& bookName, const std::string& path, const std::string& error) {
@@ -102,6 +119,10 @@ void loadReaderError(ReaderState& state, const std::string& bookName, const std:
     state.bookPath = path;
     state.loadError = error;
     state.coverImage = {};
+    clearSelection(state);
+    state.annotations.clear();
+    state.selectedAnnotation = 0;
+    state.annotationScroll = 0;
     state.images.clear();
     state.chapterTexts.clear();
     state.pages.clear();
@@ -128,6 +149,7 @@ void repaginateReader(ReaderState& state, const AppSettings& settings) {
 void nextPage(ReaderState& state) {
     if (state.page < pageCount(state)) {
         state.page += 1;
+        clearSelection(state);
         saveLastPage(state.bookPath.c_str(), state.page);
     }
 }
@@ -135,6 +157,7 @@ void nextPage(ReaderState& state) {
 void previousPage(ReaderState& state) {
     if (state.page > 1) {
         state.page -= 1;
+        clearSelection(state);
         saveLastPage(state.bookPath.c_str(), state.page);
     }
 }
@@ -162,7 +185,7 @@ void drawReader(const ReaderState& state) {
     std::printf("X                Toggle dark mode\n");
     std::printf("Minus            Back to browser\n");
     std::printf("+                Exit\n");
-    std::printf("Touch left/right side to turn pages\n");
+    std::printf("Touch a word to select it\n");
 
     consoleUpdate(nullptr);
 }

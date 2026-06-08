@@ -43,6 +43,9 @@ ifeq ($(filter clean clean-macos,$(MAKECMDGOALS)),)
   ifeq ($(wildcard $(PORTLIBS)/include/SDL2/SDL_image.h),)
     $(error switch-sdl2_image not found. Run: sudo dkp-pacman -S switch-sdl2_image)
   endif
+  ifeq ($(wildcard $(PORTLIBS)/include/curl/curl.h),)
+    $(error switch-curl not found. Run: sudo dkp-pacman -S switch-curl)
+  endif
 endif
 
 PREFIX      := $(DEVKITA64)/bin/aarch64-none-elf-
@@ -53,12 +56,15 @@ NACPTOOL    := $(DEVKITPRO)/tools/bin/nacptool
 ELF2NRO     := $(DEVKITPRO)/tools/bin/elf2nro
 NXLINK      := $(DEVKITPRO)/tools/bin/nxlink
 PKG_CONFIG  := $(PORTLIBS)/bin/aarch64-none-elf-pkg-config
+CURL_CONFIG := $(PORTLIBS)/bin/curl-config
 SDL_CFLAGS  := $(shell $(PKG_CONFIG) --cflags sdl2 SDL2_ttf SDL2_image 2>/dev/null)
 SDL_LIBS    := $(shell $(PKG_CONFIG) --libs sdl2 SDL2_ttf SDL2_image 2>/dev/null)
+CURL_CFLAGS := $(shell $(CURL_CONFIG) --cflags 2>/dev/null)
+CURL_LIBS   := $(shell $(CURL_CONFIG) --libs 2>/dev/null)
 
 ARCH        := -march=armv8-a -mtune=cortex-a57 -mtp=soft -fPIE
 
-CFLAGS      := -g -Wall -O2 -ffunction-sections $(SDL_CFLAGS)
+CFLAGS      := -g -Wall -O2 -ffunction-sections $(SDL_CFLAGS) $(CURL_CFLAGS)
 CFLAGS      += $(ARCH) $(DEFINES)
 CFLAGS      += -D__SWITCH__
 
@@ -67,7 +73,7 @@ CXXFLAGS    := $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++20
 ASFLAGS     := -g $(ARCH)
 LDFLAGS     := -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS        := $(SDL_LIBS) -lz -lnx
+LIBS        := $(SDL_LIBS) $(CURL_LIBS)
 
 LIBDIRS     := $(PORTLIBS) $(LIBNX)
 
@@ -113,7 +119,7 @@ clean:
 
 clean-macos:
 	@echo cleaning macOS AppleDouble files ...
-	@find . -path ./.git -prune -o -name '._*' -type f -delete
+	@find . -name .git -prune -o -name '._*' -type f -exec rm -f {} +
 
 run: all
 	@if [ -z "$(SWITCH_IP)" ]; then \
