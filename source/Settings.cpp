@@ -3,6 +3,7 @@
 #include "nxreader/Constants.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <dirent.h>
 #include <vector>
@@ -22,12 +23,17 @@ namespace {
 struct BundledFont {
     const char *name;
     const char *path;
+    const char *boldPath;
 };
 
 constexpr BundledFont kBundledFonts[] = {
-    {"Atkinson Hyperlegible", "romfs:/fonts/AtkinsonHyperlegible-Regular.ttf"},
-    {"Lexend", "romfs:/fonts/Lexend-Regular.ttf"},
-    {"OpenDyslexic", "romfs:/fonts/opendyslexic-regular-webfont.ttf"},
+    {"Atkinson Hyperlegible",
+     "romfs:/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Regular.ttf",
+     "romfs:/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Bold.ttf"},
+    {"Lexend", "romfs:/fonts/Lexend/Lexend-Regular.ttf", "romfs:/fonts/Lexend/Lexend-Bold.ttf"},
+    {"OpenDyslexic",
+     "romfs:/fonts/OpenDyslexic/OpenDyslexic-Regular.ttf",
+     "romfs:/fonts/OpenDyslexic/OpenDyslexic-Bold.ttf"},
 };
 constexpr int kBundledFontCount = sizeof(kBundledFonts) / sizeof(kBundledFonts[0]);
 
@@ -130,6 +136,35 @@ std::string settingsFontPath(int fontIndex) {
         return customFonts[customIndex];
     }
     return "romfs:/font.ttf";
+}
+
+std::string settingsFontBoldPath(int fontIndex) {
+    const int clampedIndex = clampFontIndex(fontIndex);
+    if (clampedIndex < kBundledFontCount) {
+        return kBundledFonts[clampedIndex].boldPath;
+    }
+
+    const std::string regularPath = settingsFontPath(fontIndex);
+    const size_t dot = regularPath.find_last_of('.');
+    const std::string stem = dot == std::string::npos ? regularPath : regularPath.substr(0, dot);
+    const std::string extension = dot == std::string::npos ? "" : regularPath.substr(dot);
+
+    const std::string candidates[] = {
+        stem + "-Bold" + extension,
+        stem + "-bold" + extension,
+        stem + " Bold" + extension,
+        stem + "_Bold" + extension,
+        stem + "_bold" + extension,
+    };
+
+    for (const std::string &candidate : candidates) {
+        FILE *file = std::fopen(candidate.c_str(), "rb");
+        if (file != nullptr) {
+            std::fclose(file);
+            return candidate;
+        }
+    }
+    return regularPath;
 }
 
 } // namespace nxreader

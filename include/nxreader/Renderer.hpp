@@ -41,12 +41,19 @@ class Renderer {
     std::vector<unsigned char> deleteSound_;
     std::vector<SDL_Texture *> darkButtonIcons_;
     std::vector<SDL_Texture *> lightButtonIcons_;
+    SDL_Texture *gridIcon_ = nullptr;
+    SDL_Texture *listIcon_ = nullptr;
+    SDL_Texture *notesIcon_ = nullptr;
+    SDL_Texture *settingsIcon_ = nullptr;
     SDL_Texture *transitionFromTexture_ = nullptr;
     SDL_Texture *transitionToTexture_ = nullptr;
+    SDL_Texture *readerBaseTexture_ = nullptr;
     int transitionFromPage_ = -1;
     int transitionToPage_ = -1;
+    int readerBasePage_ = -1;
     bool transitionShowChrome_ = false;
     bool transitionDarkMode_ = false;
+    bool readerBaseDarkMode_ = false;
     TTF_Font *bodyFont_ = nullptr;
     TTF_Font *titleFont_ = nullptr;
     TTF_Font *smallFont_ = nullptr;
@@ -61,6 +68,7 @@ class Renderer {
     int drawText(TTF_Font *font, const std::string &text, int x, int y, int wrapWidth, SDL_Color color);
     int drawSingleLine(TTF_Font *font, const std::string &text, int x, int y, int maxWidth, SDL_Color color);
     void drawHeader(const std::string &title, const std::string &subtitle);
+    void drawTexture(SDL_Texture *texture, int x, int y, int size);
     int drawButtonHint(int icon, const std::string &label, int x, int y, SDL_Color color, bool darkMode);
     bool drawImageBytes(const std::vector<unsigned char> &bytes, int x, int y, int maxWidth, int maxHeight);
     void drawReaderChrome(const ReaderState &state, SDL_Color muted);
@@ -69,6 +77,8 @@ class Renderer {
     void drawAnnotationHighlights(const ReaderState &state, bool reserveChromeSpace);
     SDL_Texture *renderReaderPageTexture(const ReaderState &state, int page, bool showChrome, SDL_Color body);
     void clearTransitionCache();
+    SDL_Texture *renderReaderBaseTexture(const ReaderState &state, bool showChrome, SDL_Color body);
+    void clearReaderBaseCache();
     void playTone(float frequency, int milliseconds, float volume);
     void playSound(const std::vector<unsigned char> &sound, float fallbackFrequency, int fallbackMilliseconds,
                    float fallbackVolume);
@@ -76,6 +86,8 @@ class Renderer {
     SDL_Texture *loadTexture(const std::string &path);
     void loadButtonIcons();
     void destroyButtonIcons();
+    void loadUiIcons();
+    void destroyUiIcons();
     SDL_Texture *buttonIcon(bool darkMode, int icon) const;
 };
 

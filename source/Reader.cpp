@@ -20,18 +20,18 @@ int pageCount(const ReaderState &state) {
 
 int linesPerPageForSettings(const AppSettings &settings) {
     if (settings.fontSize >= 36) {
-        return 8;
+        return 11;
     }
     if (settings.fontSize >= 32) {
-        return 10;
+        return 13;
     }
     if (settings.fontSize >= 28) {
-        return 12;
+        return 16;
     }
     if (settings.fontSize >= 24) {
-        return 14;
+        return 18;
     }
-    return 15;
+    return 21;
 }
 
 int columnsForSettings(const AppSettings &settings) {

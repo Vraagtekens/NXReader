@@ -1,6 +1,7 @@
 #include "nxreader/Browser.hpp"
 
 #include "nxreader/Constants.hpp"
+#include "nxreader/Epub.hpp"
 #include "nxreader/StringUtils.hpp"
 
 #include <algorithm>
@@ -60,12 +61,8 @@ void clampBrowserSelection(BrowserState &state) {
         state.selected = lastIndex;
     }
 
-    if (state.selected < state.scroll) {
-        state.scroll = state.selected;
-    }
-
-    if (state.selected >= state.scroll + kVisibleRows) {
-        state.scroll = state.selected - kVisibleRows + 1;
+    if (state.selected < state.scroll || state.selected >= state.scroll + kVisibleRows) {
+        state.scroll = (state.selected / kVisibleRows) * kVisibleRows;
     }
 }
 
@@ -95,7 +92,7 @@ void scanBookDir(BrowserState &state) {
     }
 
     if (state.currentDir != kBooksRoot) {
-        state.entries.push_back({"..", parentDir(state.currentDir), 0, true, true});
+        state.entries.push_back({"..", parentDir(state.currentDir), "..", {}, 0, true, true});
     }
 
     while (dirent *entry = readdir(dir)) {
@@ -119,10 +116,11 @@ void scanBookDir(BrowserState &state) {
 
         if (directory) {
             state.visibleDirs += 1;
+            state.entries.push_back({name, path, name, {}, size, directory, false});
         } else {
             state.visibleFiles += 1;
+            state.entries.push_back({name, path, name, {}, size, directory, false});
         }
-        state.entries.push_back({name, path, size, directory, false});
     }
 
     closedir(dir);
@@ -145,6 +143,23 @@ void scanBookDir(BrowserState &state) {
     }
 
     clampBrowserSelection(state);
+}
+
+void loadBrowserCovers(BrowserState &state) {
+    for (BrowserEntry &entry : state.entries) {
+        if (entry.directory || !entry.coverBytes.empty()) {
+            continue;
+        }
+
+        EpubBook book;
+        std::string error;
+        if (loadEpub(entry.path, book, error)) {
+            if (!book.title.empty()) {
+                entry.title = book.title;
+            }
+            entry.coverBytes = book.coverImage.bytes;
+        }
+    }
 }
 
 void enterParentDirectory(BrowserState &state) {

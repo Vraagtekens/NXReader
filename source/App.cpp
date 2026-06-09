@@ -1,5 +1,4 @@
 #include "nxreader/App.hpp"
-
 #include "nxreader/Browser.hpp"
 #include "nxreader/Constants.hpp"
 #include "nxreader/Epub.hpp"
@@ -154,9 +153,8 @@ void editSelectionNote(ReaderState &reader) {
 }
 
 void showReaderChromeAfterTurn(int &readerChromeFrames, const AppSettings &settings) {
-    if (settings.showHeaderOnTurn) {
-        readerChromeFrames = kChromeVisibleFrames;
-    }
+    (void)readerChromeFrames;
+    (void)settings;
 }
 
 void startPageTurnAnimation(PageTurnAnimation &animation, int fromPage, int toPage, int direction,
@@ -264,6 +262,7 @@ int runApp() {
     bool showSettings = false;
     bool showAnnotationSheet = false;
     bool confirmDelete = false;
+    bool sheetClosing = false;
     int sheetAnimationFrame = kSheetAnimationFrames;
     int readerChromeFrames = kChromeVisibleFrames;
     int nextHoldFrames = 0;
@@ -271,8 +270,12 @@ int runApp() {
     PageTurnAnimation pageTurnAnimation;
     BrowserState browser = makeBrowserState();
     ReaderState reader = makeReaderState();
+    browser.gridView = settings.browserGridView;
 
     scanBookDir(browser);
+    if (browser.gridView) {
+        loadBrowserCovers(browser);
+    }
     renderer.drawBrowser(browser);
 
     bool wasTouching = false;
@@ -292,8 +295,22 @@ int runApp() {
             }
             shouldRedraw = true;
         }
-        if ((showSettings || showAnnotationSheet) && sheetAnimationFrame < kSheetAnimationFrames) {
-            sheetAnimationFrame += 1;
+        if (showSettings || showAnnotationSheet) {
+            if (sheetClosing && sheetAnimationFrame > 0) {
+                sheetAnimationFrame -= 1;
+                shouldRedraw = true;
+            } else if (sheetClosing) {
+                sheetClosing = false;
+                showSettings = false;
+                showAnnotationSheet = false;
+                confirmDelete = false;
+                shouldRedraw = true;
+            } else if (sheetAnimationFrame < kSheetAnimationFrames) {
+                sheetAnimationFrame += 1;
+                shouldRedraw = true;
+            }
+        } else if (sheetClosing) {
+            sheetClosing = false;
             shouldRedraw = true;
         }
 
@@ -303,13 +320,27 @@ int runApp() {
 
         if (mode == AppMode::Browser) {
             if ((buttonsDown & HidNpadButton_Down) != 0) {
-                browser.selected += 1;
+                browser.selected += browser.gridView ? 4 : 1;
                 clampBrowserSelection(browser);
                 renderer.playMoveSound();
                 shouldRedraw = true;
             }
 
             if ((buttonsDown & HidNpadButton_Up) != 0) {
+                browser.selected -= browser.gridView ? 4 : 1;
+                clampBrowserSelection(browser);
+                renderer.playMoveSound();
+                shouldRedraw = true;
+            }
+
+            if (browser.gridView && (buttonsDown & HidNpadButton_Right) != 0) {
+                browser.selected += 1;
+                clampBrowserSelection(browser);
+                renderer.playMoveSound();
+                shouldRedraw = true;
+            }
+
+            if (browser.gridView && (buttonsDown & HidNpadButton_Left) != 0) {
                 browser.selected -= 1;
                 clampBrowserSelection(browser);
                 renderer.playMoveSound();
@@ -318,9 +349,13 @@ int runApp() {
 
             if ((buttonsDown & HidNpadButton_A) != 0) {
                 openSelectedEntry(browser, reader, mode, settings);
+                if (mode == AppMode::Browser && browser.gridView) {
+                    loadBrowserCovers(browser);
+                }
                 showSettings = false;
                 showAnnotationSheet = false;
                 confirmDelete = false;
+                sheetClosing = false;
                 sheetAnimationFrame = kSheetAnimationFrames;
                 pageTurnAnimation.active = false;
                 readerChromeFrames = kChromeVisibleFrames;
@@ -330,12 +365,29 @@ int runApp() {
 
             if ((buttonsDown & HidNpadButton_B) != 0) {
                 enterParentDirectory(browser);
+                if (browser.gridView) {
+                    loadBrowserCovers(browser);
+                }
                 renderer.playMoveSound();
                 shouldRedraw = true;
             }
 
             if ((buttonsDown & HidNpadButton_Y) != 0) {
                 scanBookDir(browser);
+                if (browser.gridView) {
+                    loadBrowserCovers(browser);
+                }
+                renderer.playConfirmSound();
+                shouldRedraw = true;
+            }
+
+            if ((buttonsDown & HidNpadButton_X) != 0) {
+                settings.browserGridView = !settings.browserGridView;
+                browser.gridView = settings.browserGridView;
+                if (browser.gridView) {
+                    loadBrowserCovers(browser);
+                }
+                saveSettings(settings);
                 renderer.playConfirmSound();
                 shouldRedraw = true;
             }
@@ -356,8 +408,7 @@ int runApp() {
                     confirmDelete = true;
                     renderer.playConfirmSound();
                 } else if (showSettings || showAnnotationSheet) {
-                    showSettings = false;
-                    showAnnotationSheet = false;
+                    sheetClosing = true;
                     renderer.playConfirmSound();
                 } else {
                     mode = AppMode::Browser;
@@ -368,12 +419,12 @@ int runApp() {
 
             if ((buttonsDown & HidNpadButton_Y) != 0) {
                 if (showSettings || showAnnotationSheet) {
-                    showSettings = false;
-                    showAnnotationSheet = false;
+                    sheetClosing = true;
                     renderer.playConfirmSound();
                 } else {
                     showSettings = false;
                     showAnnotationSheet = true;
+                    sheetClosing = false;
                     sheetAnimationFrame = 0;
                     renderer.playSheetSound();
                 }
@@ -419,7 +470,7 @@ int runApp() {
                 reader.page = std::max(1, std::min(reader.annotations[reader.selectedAnnotation].page,
                                                    static_cast<int>(reader.pages.size())));
                 reader.selectedText = reader.annotations[reader.selectedAnnotation].text;
-                showAnnotationSheet = false;
+                sheetClosing = true;
                 handledSheetAction = true;
                 renderer.playConfirmSound();
                 saveLastPage(reader.bookPath.c_str(), reader.page);
@@ -445,7 +496,7 @@ int runApp() {
                     settings.darkMode = !settings.darkMode;
                     reader.darkMode = settings.darkMode;
                 } else if (settings.selectedSetting == 3) {
-                    settings.showHeaderOnTurn = !settings.showHeaderOnTurn;
+                    settings.showPageCounter = !settings.showPageCounter;
                 } else {
                     settings.animatePageTurns = !settings.animatePageTurns;
                 }
@@ -471,7 +522,7 @@ int runApp() {
                     settings.darkMode = !settings.darkMode;
                     reader.darkMode = settings.darkMode;
                 } else if (settings.selectedSetting == 3) {
-                    settings.showHeaderOnTurn = !settings.showHeaderOnTurn;
+                    settings.showPageCounter = !settings.showPageCounter;
                 } else {
                     settings.animatePageTurns = !settings.animatePageTurns;
                 }
@@ -577,8 +628,7 @@ int runApp() {
             if (!showSettings && !showAnnotationSheet && isTouching && (!wasTouching || !reader.selectedText.empty())) {
                 const HidTouchState &touch = touchState.touches[0];
                 pageTurnAnimation.active = false;
-                renderer.selectWordAt(reader, readerChromeFrames > 0, touch.x, touch.y,
-                                      wasTouching && !reader.selectedText.empty());
+                renderer.selectWordAt(reader, false, touch.x, touch.y, wasTouching && !reader.selectedText.empty());
                 if (!reader.selectedText.empty() && !wasTouching) {
                     renderer.playMoveSound();
                 }
@@ -592,7 +642,7 @@ int runApp() {
             if (mode == AppMode::Browser) {
                 renderer.drawBrowser(browser);
             } else if (pageTurnAnimation.active && !showSettings && !showAnnotationSheet) {
-                renderer.drawReaderTransition(reader, settings, readerChromeFrames > 0, pageTurnAnimation.fromPage,
+                renderer.drawReaderTransition(reader, settings, false, pageTurnAnimation.fromPage,
                                               pageTurnAnimation.toPage, pageTurnAnimation.direction,
                                               pageTurnAnimation.frame, kPageTurnFrames);
             } else {
@@ -601,7 +651,7 @@ int runApp() {
                 const int sheetOffset =
                     sheetOpen ? (kSheetWidth * (kSheetAnimationFrames - clampedSheetFrame)) / kSheetAnimationFrames : 0;
                 renderer.drawReader(reader, settings, showSettings, showAnnotationSheet, confirmDelete, sheetOffset,
-                                    readerChromeFrames > 0);
+                                    false);
             }
         }
     }

@@ -17,7 +17,7 @@ constexpr int kScreenHeight = 720;
 constexpr int kMargin = 46;
 constexpr int kReaderChromeTop = 122;
 constexpr int kReaderFocusTop = 40;
-constexpr int kReaderBottom = 632;
+constexpr int kReaderBottom = 696;
 constexpr int kSheetWidth = 426;
 constexpr float kPi = 3.1415926535f;
 constexpr const char* kDefaultFontPath = "romfs:/font.ttf";
@@ -30,6 +30,7 @@ enum ButtonIconId {
     kIconY,
     kIconPlus,
     kIconMinus,
+    kIconX,
     kIconL,
     kIconR,
     kIconDpadVertical,
@@ -43,6 +44,7 @@ const char* kButtonIconFiles[kIconCount]{
     "Y_Button.png",
     "Plus_Button.png",
     "Minus_Button.png",
+    "X_Button.png",
     "L_Button.png",
     "R_Button.png",
     "Directional_Button_VerticalAxis.png",
@@ -55,6 +57,7 @@ const char* kButtonIconFallbacks[kIconCount]{
     "Y",
     "+",
     "-",
+    "X",
     "L",
     "R",
     "Up/Down",
@@ -268,6 +271,14 @@ TTF_Font* openConfiguredFont(int fontIndex, int fontSize, std::string* loadedPat
     return nullptr;
 }
 
+TTF_Font* openConfiguredBoldFont(int fontIndex, int fontSize) {
+    TTF_Font* font = tryOpenFont(settingsFontBoldPath(fontIndex), fontSize, nullptr);
+    if (font != nullptr) {
+        return font;
+    }
+    return openConfiguredFont(fontIndex, fontSize);
+}
+
 bool imageMarkerPath(const std::string& line, std::string& path) {
     constexpr const char* marker = "[[NXREADER_IMAGE:";
     constexpr size_t markerLength = 17;
@@ -348,6 +359,7 @@ bool Renderer::init(std::string& error) {
         deleteSound_ = loadSound("SeFlcGroupDelete.wav");
     }
     loadButtonIcons();
+    loadUiIcons();
     return true;
 }
 
@@ -383,10 +395,10 @@ bool Renderer::applySettings(const AppSettings& settings, std::string& error) {
     const std::string fontPath = settingsFontPath(fontIndex);
     std::string loadedFontPath;
     bodyFont_ = openConfiguredFont(fontIndex, fontSize, &loadedFontPath);
-    titleFont_ = openConfiguredFont(fontIndex, fontSize + 14);
+    titleFont_ = openConfiguredBoldFont(fontIndex, fontSize + 14);
     smallFont_ = TTF_OpenFont(kDefaultFontPath, 18);
     uiFont_ = TTF_OpenFont(kDefaultFontPath, 24);
-    uiTitleFont_ = TTF_OpenFont(kDefaultFontPath, 38);
+    uiTitleFont_ = TTF_OpenFont("romfs:/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Bold.ttf", 38);
     if (bodyFont_ == nullptr || titleFont_ == nullptr || smallFont_ == nullptr || uiFont_ == nullptr || uiTitleFont_ == nullptr) {
         error = std::string("Could not load font: ") + fontPath + "\n" + TTF_GetError();
         return false;
@@ -395,14 +407,15 @@ bool Renderer::applySettings(const AppSettings& settings, std::string& error) {
     loadedFontSize_ = fontSize;
     loadedFontIndex_ = fontIndex;
     loadedFontPath_ = loadedFontPath;
-    TTF_SetFontStyle(titleFont_, TTF_STYLE_BOLD);
-    TTF_SetFontStyle(uiTitleFont_, TTF_STYLE_BOLD);
     clearTransitionCache();
+    clearReaderBaseCache();
     return true;
 }
 
 void Renderer::shutdown() {
     clearTransitionCache();
+    clearReaderBaseCache();
+    destroyUiIcons();
     destroyButtonIcons();
     if (audioDevice_ != 0) {
         SDL_CloseAudioDevice(audioDevice_);
@@ -537,6 +550,24 @@ void Renderer::loadButtonIcons() {
     }
 }
 
+void Renderer::loadUiIcons() {
+    destroyUiIcons();
+    gridIcon_ = loadTexture("romfs:/icons/grid.png");
+    listIcon_ = loadTexture("romfs:/icons/three-rows.png");
+    notesIcon_ = loadTexture("romfs:/icons/clipboard-list.png");
+    settingsIcon_ = loadTexture("romfs:/icons/settings.png");
+}
+
+void Renderer::destroyUiIcons() {
+    SDL_Texture **textures[] = {&gridIcon_, &listIcon_, &notesIcon_, &settingsIcon_};
+    for (SDL_Texture **texture : textures) {
+        if (*texture != nullptr) {
+            SDL_DestroyTexture(*texture);
+            *texture = nullptr;
+        }
+    }
+}
+
 void Renderer::destroyButtonIcons() {
     for (SDL_Texture* texture : darkButtonIcons_) {
         if (texture != nullptr) {
@@ -651,6 +682,15 @@ void Renderer::drawHeader(const std::string& title, const std::string& subtitle)
     drawSingleLine(smallFont_, subtitle, kMargin, 76, 900, rgb(184, 191, 199));
 }
 
+void Renderer::drawTexture(SDL_Texture* texture, int x, int y, int size) {
+    if (texture == nullptr) {
+        return;
+    }
+
+    SDL_Rect rect{x, y, size, size};
+    SDL_RenderCopy(renderer_, texture, nullptr, &rect);
+}
+
 int Renderer::drawButtonHint(int icon, const std::string& label, int x, int y, SDL_Color color, bool darkMode) {
     SDL_Texture* texture = buttonIcon(darkMode, icon);
     int textX = x;
@@ -707,40 +747,111 @@ bool Renderer::drawImageBytes(const std::vector<unsigned char>& bytes, int x, in
 
 void Renderer::drawBrowser(const BrowserState& state) {
     clear(rgb(18, 22, 27));
-    drawHeader("NXReader", state.currentDir);
 
-    int y = 128;
+    drawTexture(gridIcon_, kMargin, 38, 30);
+    drawSingleLine(uiTitleFont_, "NXReader", kMargin + 44, 26, 420, rgb(245, 242, 232));
+    drawSingleLine(smallFont_, state.currentDir, kMargin, 76, 1060, rgb(162, 171, 181));
+
+    if (!state.gridView) {
+        int y = 126;
+        const int visibleEnd = std::min(static_cast<int>(state.entries.size()), state.scroll + kVisibleRows);
+        for (int index = state.scroll; index < visibleEnd; ++index) {
+            const BrowserEntry& entry = state.entries[index];
+            const bool selected = index == state.selected;
+
+            if (selected) {
+                SDL_Rect rect{kMargin - 14, y - 8, 1188, 46};
+                SDL_SetRenderDrawColor(renderer_, 48, 62, 77, 255);
+                SDL_RenderFillRect(renderer_, &rect);
+                SDL_SetRenderDrawColor(renderer_, 180, 186, 198, 255);
+                SDL_RenderDrawRect(renderer_, &rect);
+            }
+
+            const std::string kind = entry.directory ? "[folder] " : "";
+            const std::string label = kind + (entry.title.empty() ? entry.name : entry.title);
+            drawSingleLine(uiFont_, label, kMargin, y, 870, selected ? rgb(255, 255, 255) : rgb(219, 223, 228));
+            if (!entry.directory) {
+                drawSingleLine(smallFont_,
+                               std::to_string(std::max<long long>(1, entry.size / 1024)) + " KB",
+                               1060,
+                               y + 7,
+                               150,
+                               selected ? rgb(235, 239, 245) : rgb(162, 171, 181));
+            }
+            y += 58;
+        }
+
+        if (!state.message.empty()) {
+            drawSingleLine(smallFont_, state.message, kMargin, 626, 1060, rgb(240, 190, 120));
+        }
+    } else {
+    const int columns = 4;
+    const int tileW = 270;
+    const int tileH = 238;
+    const int startX = kMargin;
+    const int startY = 122;
+    const int gapX = 38;
+    const int gapY = 34;
     const int visibleEnd = std::min(static_cast<int>(state.entries.size()), state.scroll + kVisibleRows);
+
     for (int index = state.scroll; index < visibleEnd; ++index) {
         const BrowserEntry& entry = state.entries[index];
         const bool selected = index == state.selected;
+        const int visibleIndex = index - state.scroll;
+        const int column = visibleIndex % columns;
+        const int row = visibleIndex / columns;
+        const int x = startX + column * (tileW + gapX);
+        const int y = startY + row * (tileH + gapY);
 
-        if (selected) {
-            SDL_Rect rect{kMargin - 14, y - 8, 1188, 38};
-            SDL_SetRenderDrawColor(renderer_, 48, 62, 77, 255);
-            SDL_RenderFillRect(renderer_, &rect);
+        SDL_Rect tile{x, y, tileW, tileH};
+        SDL_SetRenderDrawColor(renderer_, selected ? 58 : 31, selected ? 68 : 38, selected ? 82 : 49, 255);
+        SDL_RenderFillRect(renderer_, &tile);
+        SDL_SetRenderDrawColor(renderer_, selected ? 180 : 74, selected ? 186 : 82, selected ? 198 : 96, 255);
+        SDL_RenderDrawRect(renderer_, &tile);
+
+        SDL_Rect coverFrame{x + 58, y + 16, 154, 146};
+        SDL_SetRenderDrawColor(renderer_, 15, 18, 22, 255);
+        SDL_RenderFillRect(renderer_, &coverFrame);
+        SDL_SetRenderDrawColor(renderer_, 86, 94, 108, 255);
+        SDL_RenderDrawRect(renderer_, &coverFrame);
+
+        if (entry.directory) {
+            SDL_Rect folder{x + 82, y + 54, 106, 72};
+            SDL_Rect tab{x + 82, y + 40, 48, 22};
+            SDL_SetRenderDrawColor(renderer_, selected ? 228 : 184, selected ? 210 : 174, selected ? 142 : 112, 255);
+            SDL_RenderFillRect(renderer_, &tab);
+            SDL_RenderFillRect(renderer_, &folder);
+            drawSingleLine(uiTitleFont_, entry.parent ? ".." : "DIR", x + 96, y + 70, 84, rgb(29, 31, 36));
+        } else if (!entry.coverBytes.empty()) {
+            drawImageBytes(entry.coverBytes, coverFrame.x + 8, coverFrame.y + 8, coverFrame.w - 16, coverFrame.h - 16);
         }
 
-        std::string label = entry.directory ? "[DIR] " + entry.name : entry.name;
-        drawSingleLine(uiFont_, label, kMargin, y, 950, selected ? rgb(255, 255, 255) : rgb(219, 223, 228));
+        const std::string label = entry.title.empty() ? entry.name : entry.title;
+        drawSingleLine(smallFont_, label, x + 16, y + 174, tileW - 32, selected ? rgb(255, 255, 255) : rgb(219, 223, 228));
         if (!entry.directory) {
-            drawSingleLine(smallFont_, std::to_string(entry.size / 1024) + " KB", 1060, y + 5, 150,
-                           selected ? rgb(235, 239, 245) : rgb(162, 171, 181));
+            drawSingleLine(smallFont_,
+                           std::to_string(std::max<long long>(1, entry.size / 1024)) + " KB",
+                           x + 16,
+                           y + 202,
+                           tileW - 32,
+                           rgb(162, 171, 181));
         }
-        y += 42;
     }
 
     if (!state.message.empty()) {
-        drawText(smallFont_, state.message, kMargin, y + 16, 1080, rgb(240, 190, 120));
+        drawSingleLine(smallFont_, state.message, kMargin, 626, 1060, rgb(240, 190, 120));
+    }
     }
 
     const SDL_Color footerText = rgb(162, 171, 181);
-    const std::string footer = "Books: " + std::to_string(state.visibleFiles) + "    Folders: " +
-                               std::to_string(state.visibleDirs) + "    Hidden: " + std::to_string(state.hiddenFiles);
-    drawSingleLine(smallFont_, footer, kMargin, 672, 520, footerText);
-    int hintX = 600;
+    const std::string footer = "Books " + std::to_string(state.visibleFiles) + "    Folders " +
+                               std::to_string(state.visibleDirs) + "    Hidden " + std::to_string(state.hiddenFiles);
+    drawSingleLine(smallFont_, footer, kMargin, 672, 430, footerText);
+    int hintX = 520;
+    hintX += drawButtonHint(state.gridView ? kIconDpadHorizontal : kIconDpadVertical, "Move", hintX, 670, footerText, true);
     hintX += drawButtonHint(kIconA, "Open", hintX, 670, footerText, true);
     hintX += drawButtonHint(kIconB, "Parent", hintX, 670, footerText, true);
+    hintX += drawButtonHint(kIconX, state.gridView ? "List" : "Grid", hintX, 670, footerText, true);
     hintX += drawButtonHint(kIconY, "Refresh", hintX, 670, footerText, true);
     drawButtonHint(kIconPlus, "Exit", hintX, 670, footerText, true);
     present();
@@ -1003,6 +1114,15 @@ void Renderer::clearTransitionCache() {
     transitionDarkMode_ = false;
 }
 
+void Renderer::clearReaderBaseCache() {
+    if (readerBaseTexture_ != nullptr) {
+        SDL_DestroyTexture(readerBaseTexture_);
+        readerBaseTexture_ = nullptr;
+    }
+    readerBasePage_ = -1;
+    readerBaseDarkMode_ = false;
+}
+
 SDL_Texture* Renderer::renderReaderPageTexture(const ReaderState& state, int page, bool showChrome, SDL_Color body) {
     SDL_Texture* texture = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, kScreenWidth, kScreenHeight);
     if (texture == nullptr) {
@@ -1026,25 +1146,78 @@ SDL_Texture* Renderer::renderReaderPageTexture(const ReaderState& state, int pag
     return texture;
 }
 
+SDL_Texture* Renderer::renderReaderBaseTexture(const ReaderState& state, bool showChrome, SDL_Color body) {
+    SDL_Texture* texture =
+        SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, kScreenWidth, kScreenHeight);
+    if (texture == nullptr) {
+        return nullptr;
+    }
+
+    SDL_Texture* previousTarget = SDL_GetRenderTarget(renderer_);
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
+    if (SDL_SetRenderTarget(renderer_, texture) != 0) {
+        SDL_DestroyTexture(texture);
+        return nullptr;
+    }
+
+    clear(state.darkMode ? rgb(14, 17, 21) : rgb(236, 232, 220));
+    drawReaderPageContent(state, state.page, showChrome, 0, body);
+    drawAnnotationHighlights(state, showChrome);
+    SDL_SetRenderTarget(renderer_, previousTarget);
+    return texture;
+}
+
 void Renderer::drawReader(const ReaderState& state,
                           const AppSettings& settings,
                           bool showSettings,
                           bool showAnnotationSheet,
                           bool confirmDelete,
                           int sheetOffset,
-                          bool showChrome) {
+    bool showChrome) {
     clearTransitionCache();
-    clear(state.darkMode ? rgb(14, 17, 21) : rgb(236, 232, 220));
 
     const SDL_Color body = state.darkMode ? rgb(238, 235, 225) : rgb(25, 28, 33);
     const SDL_Color muted = state.darkMode ? rgb(164, 172, 181) : rgb(82, 88, 96);
     const bool sheetOpen = showSettings || showAnnotationSheet;
 
-    if (showChrome) {
-        drawReaderChrome(state, muted);
+    if (sheetOpen) {
+        const bool cacheMatches =
+            readerBaseTexture_ != nullptr && readerBasePage_ == state.page && readerBaseDarkMode_ == state.darkMode;
+        if (!cacheMatches) {
+            clearReaderBaseCache();
+            readerBaseTexture_ = renderReaderBaseTexture(state, showChrome, body);
+            readerBasePage_ = state.page;
+            readerBaseDarkMode_ = state.darkMode;
+        }
+
+        if (readerBaseTexture_ != nullptr) {
+            SDL_RenderCopy(renderer_, readerBaseTexture_, nullptr, nullptr);
+        } else {
+            clear(state.darkMode ? rgb(14, 17, 21) : rgb(236, 232, 220));
+            drawReaderPageContent(state, state.page, showChrome, 0, body);
+            drawAnnotationHighlights(state, showChrome);
+        }
+    } else {
+        clearReaderBaseCache();
+        clear(state.darkMode ? rgb(14, 17, 21) : rgb(236, 232, 220));
+        if (showChrome) {
+            drawReaderChrome(state, muted);
+        }
+        drawReaderPageContent(state, state.page, showChrome, 0, body);
+        drawAnnotationHighlights(state, showChrome);
     }
-    drawReaderPageContent(state, state.page, showChrome, 0, body);
-    drawAnnotationHighlights(state, showChrome);
+
+    if (settings.showPageCounter && !sheetOpen) {
+        const std::string counter =
+            std::to_string(state.page) + " / " + std::to_string(std::max<int>(1, state.pages.size()));
+        const int width = utf8TextWidth(smallFont_, counter);
+        SDL_Rect panel{kScreenWidth - width - 80, 654, width + 34, 34};
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, state.darkMode ? 24 : 245, state.darkMode ? 28 : 242, state.darkMode ? 34 : 234, 228);
+        SDL_RenderFillRect(renderer_, &panel);
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
+        drawSingleLine(smallFont_, counter, panel.x + 17, panel.y + 8, width + 4, muted);
+    }
 
     if (!state.selectedText.empty() && !showSettings && !showAnnotationSheet) {
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
@@ -1098,8 +1271,10 @@ void Renderer::drawReader(const ReaderState& state,
         SDL_SetRenderDrawColor(renderer_, state.darkMode ? 90 : 178, state.darkMode ? 98 : 184, state.darkMode ? 112 : 194, 255);
         SDL_RenderDrawRect(renderer_, &notesTab);
         SDL_RenderDrawRect(renderer_, &settingsTab);
-        drawSingleLine(uiFont_, "Notes", notesTab.x + 22, notesTab.y + 10, notesTab.w - 44, showAnnotationSheet ? activeTab : inactiveTab);
-        drawSingleLine(uiFont_, "Settings", settingsTab.x + 18, settingsTab.y + 10, settingsTab.w - 36, showSettings ? activeTab : inactiveTab);
+        drawTexture(notesIcon_, notesTab.x + 16, notesTab.y + 12, 22);
+        drawTexture(settingsIcon_, settingsTab.x + 14, settingsTab.y + 12, 22);
+        drawSingleLine(uiFont_, "Notes", notesTab.x + 46, notesTab.y + 10, notesTab.w - 58, showAnnotationSheet ? activeTab : inactiveTab);
+        drawSingleLine(uiFont_, "Settings", settingsTab.x + 42, settingsTab.y + 10, settingsTab.w - 52, showSettings ? activeTab : inactiveTab);
 
         if (showSettings) {
             const SDL_Color settingSelected = state.darkMode ? rgb(255, 255, 255) : rgb(12, 20, 30);
@@ -1108,7 +1283,7 @@ void Renderer::drawReader(const ReaderState& state,
                 "Font: " + fontName,
                 "Size: " + std::to_string(settings.fontSize),
                 std::string("Theme: ") + (settings.darkMode ? "Dark" : "Light"),
-                std::string("Header on turn: ") + (settings.showHeaderOnTurn ? "On" : "Off"),
+                std::string("Page counter: ") + (settings.showPageCounter ? "On" : "Off"),
                 std::string("Page animation: ") + (settings.animatePageTurns ? "On" : "Off"),
             };
             int y = 164;
@@ -1231,6 +1406,18 @@ void Renderer::drawReaderTransition(const ReaderState& state,
 
     if (showChrome) {
         drawReaderChrome(state, muted);
+    }
+    if (settings.showPageCounter) {
+        const std::string counter =
+            std::to_string(state.page) + " / " + std::to_string(std::max<int>(1, state.pages.size()));
+        const int width = utf8TextWidth(smallFont_, counter);
+        SDL_Rect panel{kScreenWidth - width - 80, 654, width + 34, 34};
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, state.darkMode ? 24 : 245, state.darkMode ? 28 : 242,
+                               state.darkMode ? 34 : 234, 228);
+        SDL_RenderFillRect(renderer_, &panel);
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
+        drawSingleLine(smallFont_, counter, panel.x + 17, panel.y + 8, width + 4, muted);
     }
     (void)settings;
     present();

@@ -24,6 +24,7 @@ export COPYFILE_DISABLE := 1
 APP_TITLE   := NXReader
 APP_AUTHOR  := Vraagtekens
 APP_VERSION := 0.1.0
+APP_ICON    := romfs/favicon.jpg
 SWITCH_IP   ?= 
 UPLOAD_PATH ?= /switch/$(TARGET).nro
 
@@ -147,7 +148,7 @@ $(OUTPUT).elf: $(OFILES)
 %.nro: %.elf
 	@echo creating $(notdir $@)
 	@$(NACPTOOL) --create "$(APP_TITLE)" "$(APP_AUTHOR)" "$(APP_VERSION)" "$(OUTPUT).nacp"
-	@$(ELF2NRO) $< $@ --nacp="$(OUTPUT).nacp" --romfsdir="$(TOPDIR)/$(ROMFS)"
+	@$(ELF2NRO) $< $@ --nacp="$(OUTPUT).nacp" --icon="$(TOPDIR)/$(APP_ICON)" --romfsdir="$(TOPDIR)/$(ROMFS)"
 
 %.o: %.cpp
 	@echo $(notdir $<)

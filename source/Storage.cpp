@@ -150,13 +150,17 @@ AppSettings loadSettings() {
     int darkMode = settings.darkMode ? 1 : 0;
     int showHeaderOnTurn = settings.showHeaderOnTurn ? 1 : 0;
     int animatePageTurns = settings.animatePageTurns ? 1 : 0;
+    int showPageCounter = settings.showPageCounter ? 1 : 0;
+    int browserGridView = settings.browserGridView ? 1 : 0;
     std::fscanf(file,
-                "fontSize=%d\nfontIndex=%d\ndarkMode=%d\nshowHeaderOnTurn=%d\nanimatePageTurns=%d",
+                "fontSize=%d\nfontIndex=%d\ndarkMode=%d\nshowHeaderOnTurn=%d\nanimatePageTurns=%d\nshowPageCounter=%d\nbrowserGridView=%d",
                 &fontSize,
                 &fontIndex,
                 &darkMode,
                 &showHeaderOnTurn,
-                &animatePageTurns);
+                &animatePageTurns,
+                &showPageCounter,
+                &browserGridView);
     std::fclose(file);
 
     settings.fontSize = clampFontSize(fontSize);
@@ -164,6 +168,8 @@ AppSettings loadSettings() {
     settings.darkMode = darkMode != 0;
     settings.showHeaderOnTurn = showHeaderOnTurn != 0;
     settings.animatePageTurns = animatePageTurns != 0;
+    settings.showPageCounter = showPageCounter != 0;
+    settings.browserGridView = browserGridView != 0;
     return settings;
 }
 
@@ -175,12 +181,15 @@ void saveSettings(const AppSettings& settings) {
         return;
     }
 
-    std::fprintf(file, "fontSize=%d\nfontIndex=%d\ndarkMode=%d\nshowHeaderOnTurn=%d\nanimatePageTurns=%d\n",
+    std::fprintf(file,
+                 "fontSize=%d\nfontIndex=%d\ndarkMode=%d\nshowHeaderOnTurn=%d\nanimatePageTurns=%d\nshowPageCounter=%d\nbrowserGridView=%d\n",
                  clampFontSize(settings.fontSize),
                  clampFontIndex(settings.fontIndex),
                  settings.darkMode ? 1 : 0,
                  settings.showHeaderOnTurn ? 1 : 0,
-                 settings.animatePageTurns ? 1 : 0);
+                 settings.animatePageTurns ? 1 : 0,
+                 settings.showPageCounter ? 1 : 0,
+                 settings.browserGridView ? 1 : 0);
     std::fclose(file);
 }
 
