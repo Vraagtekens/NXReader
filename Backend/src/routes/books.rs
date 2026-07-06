@@ -1,0 +1,149 @@
+use crate::{
+    contracts::{Book, UpsertBookRequest},
+    error::{ApiError, ApiResult},
+    services::{
+        books::{self, UploadedBook},
+        storage,
+    },
+    state::AppState,
+};
+use axum::{
+    Json,
+    extract::{Multipart, Path, State},
+};
+use bytes::Bytes;
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
+
+#[utoipa::path(
+    post,
+    path = "/books",
+    tag = "books",
+    request_body = UpsertBookRequest,
+    responses((status = 200, body = Book))
+)]
+pub async fn upsert_book(
+    State(state): State<AppState>,
+    Json(request): Json<UpsertBookRequest>,
+) -> ApiResult<Json<Book>> {
+    Ok(Json(books::upsert(&state.pool, request).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/books/upload",
+    tag = "books",
+    responses((status = 200, body = Book), (status = 400))
+)]
+pub async fn upload_book(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> ApiResult<Json<Book>> {
+    let mut title = None;
+    let mut author = None;
+    let mut file_name = None;
+    let mut file_bytes = None;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|error| ApiError::BadRequest(format!("invalid multipart upload: {error}")))?
+    {
+        let name = field.name().unwrap_or_default().to_string();
+
+        match name.as_str() {
+            "file" => {
+                file_name = field.file_name().map(ToString::to_string);
+                file_bytes = Some(field.bytes().await.map_err(|error| {
+                    ApiError::BadRequest(format!("could not read uploaded EPUB: {error}"))
+                })?);
+            }
+            "title" => {
+                title = Some(field.text().await.map_err(|error| {
+                    ApiError::BadRequest(format!("could not read title: {error}"))
+                })?);
+            }
+            "author" => {
+                author = Some(field.text().await.map_err(|error| {
+                    ApiError::BadRequest(format!("could not read author: {error}"))
+                })?);
+            }
+            _ => {}
+        }
+    }
+
+    let file_bytes =
+        file_bytes.ok_or_else(|| ApiError::BadRequest("file is required".to_string()))?;
+    let file_name = file_name.unwrap_or_else(|| "book.epub".to_string());
+
+    if !file_name.to_ascii_lowercase().ends_with(".epub") {
+        return Err(ApiError::BadRequest(
+            "uploaded file must have a .epub extension".to_string(),
+        ));
+    }
+
+    let content_hash = hash_bytes(&file_bytes);
+    let storage_key = format!("{content_hash}.epub");
+    storage::ensure_bucket(&state.s3, &state.s3_bucket)
+        .await
+        .map_err(|error| ApiError::Storage(error.to_string()))?;
+    storage::put_epub(
+        &state.s3,
+        &state.s3_bucket,
+        &storage_key,
+        file_bytes.clone(),
+    )
+    .await
+    .map_err(|error| ApiError::Storage(error.to_string()))?;
+
+    let title = title
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| title_from_file_name(&file_name));
+
+    let book = books::upsert_uploaded(
+        &state.pool,
+        UploadedBook {
+            content_hash,
+            title,
+            author: author.filter(|value| !value.trim().is_empty()),
+            file_name: Some(file_name),
+            storage_key,
+            mime_type: "application/epub+zip".to_string(),
+            file_size_bytes: file_bytes.len() as i64,
+        },
+    )
+    .await?;
+
+    Ok(Json(book))
+}
+
+#[utoipa::path(
+    get,
+    path = "/books/{book_id}",
+    tag = "books",
+    params(("book_id" = Uuid, Path, description = "Book id")),
+    responses((status = 200, body = Book), (status = 404))
+)]
+pub async fn get_book(
+    State(state): State<AppState>,
+    Path(book_id): Path<Uuid>,
+) -> ApiResult<Json<Book>> {
+    let book = books::get(&state.pool, book_id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    Ok(Json(book))
+}
+
+fn hash_bytes(bytes: &Bytes) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
+
+fn title_from_file_name(file_name: &str) -> String {
+    file_name
+        .strip_suffix(".epub")
+        .or_else(|| file_name.strip_suffix(".EPUB"))
+        .unwrap_or(file_name)
+        .to_string()
+}

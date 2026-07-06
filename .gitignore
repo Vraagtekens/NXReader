@@ -1,9 +1,16 @@
-build/
-*.elf
-*.nro
-*.nacp
-*.map
-*.d
-*.o
 .DS_Store
-._*
+
+# Backend
+Backend/.env
+Backend/target/
+Backend/books/
+
+# iOS / Xcode
+iOS/DerivedData/
+iOS/**/*.xcuserstate
+iOS/**/*.xcuserdata/
+iOS/**/*.xcuserdatad/
+
+# Local editor noise
+.vscode/
+.idea/
