@@ -18,7 +18,7 @@ struct HomeView: View {
 
                 if let recentBook {
                     NavigationLink {
-                        ReaderView(book: recentBook, store: store)
+                        BookOpenView(book: recentBook, store: store)
                     } label: {
                         RecentBookCard(book: recentBook)
                     }
@@ -46,7 +46,7 @@ struct HomeView: View {
                         HStack(spacing: 14) {
                             ForEach(books.dropFirst()) { book in
                                 NavigationLink {
-                                    ReaderView(book: book, store: store)
+                                    BookOpenView(book: book, store: store)
                                 } label: {
                                     SmallBookCard(book: book)
                                 }
@@ -107,6 +107,14 @@ struct SmallBookCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             BookCover(book: book, width: 96, height: 142)
+                .overlay(alignment: .topTrailing) {
+                    if book.isDownloaded {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.white, .green)
+                            .padding(6)
+                    }
+                }
             Text(book.title)
                 .font(.subheadline.bold())
                 .lineLimit(2)

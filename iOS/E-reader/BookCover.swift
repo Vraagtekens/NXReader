@@ -1,9 +1,12 @@
 import SwiftUI
+import UIKit
 
 struct BookCover: View {
     let book: ReaderBook
     let width: CGFloat
     let height: CGFloat
+    @State private var coverImage: UIImage?
+    @State private var didTryLoadingCover = false
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -13,21 +16,46 @@ struct BookCover: View {
                 endPoint: .bottomTrailing
             )
 
-            VStack(alignment: .leading, spacing: 7) {
-                Text(book.title)
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(4)
-                Text(book.author)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.78))
-                    .lineLimit(2)
+            if let coverImage {
+                Image(uiImage: coverImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: width, height: height)
+                    .clipped()
+            } else {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(book.title)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(4)
+                    Text(book.author)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineLimit(2)
+                }
+                .padding(12)
             }
-            .padding(12)
         }
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .shadow(color: .black.opacity(0.18), radius: 12, y: 8)
+        .task(id: book.id) {
+            await loadCoverIfNeeded()
+        }
+    }
+
+    private func loadCoverIfNeeded() async {
+        guard !didTryLoadingCover, book.storageKey != nil else {
+            return
+        }
+        didTryLoadingCover = true
+
+        guard let data = try? await BackendClient().coverImageData(book),
+              let image = UIImage(data: data) else {
+            return
+        }
+
+        coverImage = image
     }
 }
 

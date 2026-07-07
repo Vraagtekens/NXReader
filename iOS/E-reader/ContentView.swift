@@ -45,6 +45,9 @@ struct ContentView: View {
             }
         }
         .tint(.primary)
+        .task {
+            await store.refreshFromBackend()
+        }
     }
 }
 

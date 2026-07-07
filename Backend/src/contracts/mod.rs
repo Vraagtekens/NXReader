@@ -11,8 +11,12 @@ use uuid::Uuid;
     paths(
         crate::routes::health::health,
         crate::routes::books::upsert_book,
+        crate::routes::books::list_books,
         crate::routes::books::upload_book,
         crate::routes::books::get_book,
+        crate::routes::books::download_book,
+        crate::routes::books::cover_book,
+        crate::routes::books::read_book,
         crate::routes::progress::get_progress,
         crate::routes::progress::put_progress,
         crate::routes::annotations::list_annotations,
@@ -22,6 +26,7 @@ use uuid::Uuid;
     components(schemas(
         HealthResponse,
         Book,
+        BookRead,
         UpsertBookRequest,
         ReadingProgress,
         PutProgressRequest,
@@ -70,6 +75,14 @@ pub struct Book {
     pub file_size_bytes: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BookRead {
+    pub book_id: Uuid,
+    pub title: String,
+    pub text: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

@@ -55,6 +55,9 @@ class Renderer {
     bool transitionDarkMode_ = false;
     bool readerBaseDarkMode_ = false;
     TTF_Font *bodyFont_ = nullptr;
+    TTF_Font *bodyBoldFont_ = nullptr;
+    TTF_Font *bodyItalicFont_ = nullptr;
+    TTF_Font *bodyBoldItalicFont_ = nullptr;
     TTF_Font *titleFont_ = nullptr;
     TTF_Font *smallFont_ = nullptr;
     TTF_Font *uiFont_ = nullptr;

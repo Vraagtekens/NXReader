@@ -24,16 +24,26 @@ struct BundledFont {
     const char *name;
     const char *path;
     const char *boldPath;
+    const char *italicPath;
+    const char *boldItalicPath;
 };
 
 constexpr BundledFont kBundledFonts[] = {
     {"Atkinson Hyperlegible",
      "romfs:/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Regular.ttf",
-     "romfs:/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Bold.ttf"},
-    {"Lexend", "romfs:/fonts/Lexend/Lexend-Regular.ttf", "romfs:/fonts/Lexend/Lexend-Bold.ttf"},
+     "romfs:/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Bold.ttf",
+     "romfs:/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Italic.ttf",
+     "romfs:/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-BoldItalic.ttf"},
+    {"Lexend",
+     "romfs:/fonts/Lexend/Lexend-Regular.ttf",
+     "romfs:/fonts/Lexend/Lexend-Bold.ttf",
+     "romfs:/fonts/Lexend/Lexend-Italic.ttf",
+     "romfs:/fonts/Lexend/Lexend-BoldItalic.ttf"},
     {"OpenDyslexic",
      "romfs:/fonts/OpenDyslexic/OpenDyslexic-Regular.ttf",
-     "romfs:/fonts/OpenDyslexic/OpenDyslexic-Bold.ttf"},
+     "romfs:/fonts/OpenDyslexic/OpenDyslexic-Bold.ttf",
+     "romfs:/fonts/OpenDyslexic/OpenDyslexic-Italic.ttf",
+     "romfs:/fonts/OpenDyslexic/OpenDyslexic-BoldItalic.ttf"},
 };
 constexpr int kBundledFontCount = sizeof(kBundledFonts) / sizeof(kBundledFonts[0]);
 
@@ -104,6 +114,22 @@ std::string fontNameFromPath(const std::string &path) {
     return name;
 }
 
+std::string siblingFontPath(const std::string &regularPath, const std::vector<std::string> &suffixes) {
+    const size_t dot = regularPath.find_last_of('.');
+    const std::string stem = dot == std::string::npos ? regularPath : regularPath.substr(0, dot);
+    const std::string extension = dot == std::string::npos ? "" : regularPath.substr(dot);
+
+    for (const std::string &suffix : suffixes) {
+        const std::string candidate = stem + suffix + extension;
+        FILE *file = std::fopen(candidate.c_str(), "rb");
+        if (file != nullptr) {
+            std::fclose(file);
+            return candidate;
+        }
+    }
+    return regularPath;
+}
+
 } // namespace
 
 int settingsFontCount() {
@@ -144,27 +170,27 @@ std::string settingsFontBoldPath(int fontIndex) {
         return kBundledFonts[clampedIndex].boldPath;
     }
 
-    const std::string regularPath = settingsFontPath(fontIndex);
-    const size_t dot = regularPath.find_last_of('.');
-    const std::string stem = dot == std::string::npos ? regularPath : regularPath.substr(0, dot);
-    const std::string extension = dot == std::string::npos ? "" : regularPath.substr(dot);
+    return siblingFontPath(settingsFontPath(fontIndex), {"-Bold", "-bold", " Bold", "_Bold", "_bold"});
+}
 
-    const std::string candidates[] = {
-        stem + "-Bold" + extension,
-        stem + "-bold" + extension,
-        stem + " Bold" + extension,
-        stem + "_Bold" + extension,
-        stem + "_bold" + extension,
-    };
-
-    for (const std::string &candidate : candidates) {
-        FILE *file = std::fopen(candidate.c_str(), "rb");
-        if (file != nullptr) {
-            std::fclose(file);
-            return candidate;
-        }
+std::string settingsFontItalicPath(int fontIndex) {
+    const int clampedIndex = clampFontIndex(fontIndex);
+    if (clampedIndex < kBundledFontCount) {
+        return kBundledFonts[clampedIndex].italicPath;
     }
-    return regularPath;
+
+    return siblingFontPath(settingsFontPath(fontIndex), {"-Italic", "-italic", " Italic", "_Italic", "_italic"});
+}
+
+std::string settingsFontBoldItalicPath(int fontIndex) {
+    const int clampedIndex = clampFontIndex(fontIndex);
+    if (clampedIndex < kBundledFontCount) {
+        return kBundledFonts[clampedIndex].boldItalicPath;
+    }
+
+    return siblingFontPath(settingsFontPath(fontIndex),
+                           {"-BoldItalic", "-Bold-Italic", "-bolditalic", "-bold-italic", " Bold Italic",
+                            "_BoldItalic", "_Bold_Italic", "_bolditalic", "_bold_italic"});
 }
 
 } // namespace nxreader

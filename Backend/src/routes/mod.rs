@@ -12,9 +12,12 @@ use utoipa::OpenApi;
 
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
-        .route("/books", post(books::upsert_book))
+        .route("/books", get(books::list_books).post(books::upsert_book))
         .route("/books/upload", post(books::upload_book))
         .route("/books/{book_id}", get(books::get_book))
+        .route("/books/{book_id}/download", get(books::download_book))
+        .route("/books/{book_id}/cover", get(books::cover_book))
+        .route("/books/{book_id}/read", get(books::read_book))
         .route(
             "/books/{book_id}/progress",
             get(progress::get_progress).put(progress::put_progress),

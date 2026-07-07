@@ -21,5 +21,7 @@ int settingsFontCount();
 std::string settingsFontName(int fontIndex);
 std::string settingsFontPath(int fontIndex);
 std::string settingsFontBoldPath(int fontIndex);
+std::string settingsFontItalicPath(int fontIndex);
+std::string settingsFontBoldItalicPath(int fontIndex);
 
 } // namespace nxreader

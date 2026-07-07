@@ -7,6 +7,7 @@ final class ReaderBook: ObservableObject, Identifiable {
     @Published var author: String
     @Published var fileName: String?
     @Published var storageKey: String?
+    @Published var isDownloaded: Bool
     @Published var coverColorHex: String
     @Published var currentPage: Int
     @Published var currentPart: Int
@@ -22,6 +23,7 @@ final class ReaderBook: ObservableObject, Identifiable {
         author: String,
         fileName: String? = nil,
         storageKey: String? = nil,
+        isDownloaded: Bool = false,
         coverColorHex: String,
         currentPage: Int = 1,
         currentPart: Int = 1,
@@ -36,6 +38,7 @@ final class ReaderBook: ObservableObject, Identifiable {
         self.author = author
         self.fileName = fileName
         self.storageKey = storageKey
+        self.isDownloaded = isDownloaded
         self.coverColorHex = coverColorHex
         self.currentPage = currentPage
         self.currentPart = currentPart
@@ -87,11 +90,70 @@ final class LibraryStore: ObservableObject {
     @Published var books: [ReaderBook]
     @Published var notes: [ReaderNote]
     @Published var readingDays: [ReadingDay]
+    @Published var syncError: String?
+    @Published var downloadingBookIDs: Set<UUID>
+
+    private let backend = BackendClient()
 
     init() {
         books = SampleLibrary.books
         notes = SampleLibrary.notes
         readingDays = SampleLibrary.readingDays
+        syncError = nil
+        downloadingBookIDs = []
+    }
+
+    @MainActor
+    func refreshFromBackend() async {
+        do {
+            let remoteBooks = try await backend.listBooks()
+            books = remoteBooks.map(ReaderBook.init(backendBook:))
+            syncError = nil
+        } catch {
+            syncError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func ensureDownloaded(_ book: ReaderBook) async -> URL? {
+        if let cachedURL = try? BookCache.cachedURL(for: book),
+           FileManager.default.fileExists(atPath: cachedURL.path) {
+            book.isDownloaded = true
+            return cachedURL
+        }
+
+        downloadingBookIDs.insert(book.id)
+        defer {
+            downloadingBookIDs.remove(book.id)
+        }
+
+        do {
+            let url = try await backend.downloadBook(book)
+            book.isDownloaded = true
+            syncError = nil
+            return url
+        } catch {
+            syncError = error.localizedDescription
+            return nil
+        }
+    }
+
+    @MainActor
+    func loadReadableText(_ book: ReaderBook) async -> Bool {
+        guard book.storageKey != nil else {
+            return true
+        }
+
+        do {
+            let readable = try await backend.readBook(book)
+            book.sampleText = readable.text
+            book.pageCount = max(1, readable.text.count / 1_500)
+            syncError = nil
+            return true
+        } catch {
+            syncError = error.localizedDescription
+            return false
+        }
     }
 
     func addImportedBook(fileName: String) {
@@ -116,27 +178,52 @@ final class LibraryStore: ObservableObject {
     }
 }
 
+private extension ReaderBook {
+    convenience init(backendBook: BackendBook) {
+        self.init(
+            id: backendBook.id,
+            title: backendBook.title,
+            author: backendBook.author ?? "Unknown Author",
+            fileName: backendBook.fileName,
+            storageKey: backendBook.storageKey,
+            isDownloaded: (try? BookCache.cachedURL(forID: backendBook.id).checkResourceIsReachable()) ?? false,
+            coverColorHex: Self.coverColor(for: backendBook.contentHash),
+            currentPage: 1,
+            pageCount: 1,
+            lastOpenedAt: backendBook.updatedAt,
+            createdAt: backendBook.createdAt,
+            sampleText: SampleLibrary.readerText
+        )
+    }
+
+    static func coverColor(for value: String) -> String {
+        let colors = ["3454D1", "1F8A70", "C44536", "8A4FFF", "2F4858"]
+        let sum = value.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return colors[sum % colors.count]
+    }
+}
+
 enum SampleLibrary {
     static let readerText = """
-    Grand titre H1: Elevation
+    # Grand titre H1: Elevation
 
     Ce paragraphe teste les accents francais: poete, peche, foret, coeur, deja, ou, ca, Noel, garcon.
 
-    Sous-titre H2: Au lecteur
+    ## Sous-titre H2: Au lecteur
 
-    Texte normal, puis texte en gras, puis texte en italique, puis gras italique.
+    Texte normal, puis **texte en gras**, puis _texte en italique_, puis **_gras italique_**.
 
-    Variantes avec balises courtes: b en gras, i en italique, et b plus i ensemble.
+    Variantes avec balises courtes: **b en gras**, _i en italique_, et **_b plus i ensemble_**.
 
-    Titre H3: Dialogue
+    ### Titre H3: Dialogue
 
     Bonjour, dit-elle. C'est une phrase avec des guillemets francais, une apostrophe, et un tiret simple - pour tester le rendu.
 
     Une citation longue devrait avoir un style distinct plus tard. Pour l'instant, elle aide a voir si le texte reste lisible.
 
-    Liste: premier element avec italique.
+    - premier element avec _italique_.
 
-    Liste: deuxieme element avec gras.
+    - deuxieme element avec **gras**.
 
     Liste: troisieme element avec petites capitales.
 

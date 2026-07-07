@@ -192,6 +192,182 @@ std::vector<std::string> splitWords(const std::string& line) {
     return words;
 }
 
+bool inlineStyleMarkerAt(const std::string& text, size_t index, char& style, bool& enabled) {
+    if (index + 2 >= text.size() || static_cast<unsigned char>(text[index]) != 0x1f) {
+        return false;
+    }
+
+    style = text[index + 1];
+    enabled = text[index + 2] == '1';
+    return (style == 'I' || style == 'B') && (text[index + 2] == '0' || text[index + 2] == '1');
+}
+
+int fontStyle(bool bold, bool italic) {
+    int style = TTF_STYLE_NORMAL;
+    if (bold) {
+        style |= TTF_STYLE_BOLD;
+    }
+    if (italic) {
+        style |= TTF_STYLE_ITALIC;
+    }
+    return style;
+}
+
+TTF_Font* styledFont(TTF_Font* regularFont,
+                     TTF_Font* boldFont,
+                     TTF_Font* italicFont,
+                     TTF_Font* boldItalicFont,
+                     bool bold,
+                     bool italic) {
+    if (bold && italic) {
+        return boldItalicFont == nullptr ? regularFont : boldItalicFont;
+    }
+    if (bold) {
+        return boldFont == nullptr ? regularFont : boldFont;
+    }
+    if (italic) {
+        return italicFont == nullptr ? regularFont : italicFont;
+    }
+    return regularFont;
+}
+
+int styledTextWidth(TTF_Font* regularFont,
+                    TTF_Font* boldFont,
+                    TTF_Font* italicFont,
+                    TTF_Font* boldItalicFont,
+                    const std::string& text,
+                    bool bold,
+                    bool italic) {
+    if (text.empty()) {
+        return 0;
+    }
+
+    TTF_Font* font = styledFont(regularFont, boldFont, italicFont, boldItalicFont, bold, italic);
+    const int previousStyle = TTF_GetFontStyle(font);
+    TTF_SetFontStyle(font, font == regularFont ? fontStyle(bold, italic) : TTF_STYLE_NORMAL);
+    const int width = utf8TextWidth(font, text);
+    TTF_SetFontStyle(font, previousStyle);
+    return width;
+}
+
+void drawStyledWord(SDL_Renderer* renderer,
+                    TTF_Font* regularFont,
+                    TTF_Font* boldFont,
+                    TTF_Font* italicFont,
+                    TTF_Font* boldItalicFont,
+                    const std::string& text,
+                    bool bold,
+                    bool italic,
+                    int x,
+                    int y,
+                    SDL_Color color) {
+    if (text.empty()) {
+        return;
+    }
+
+    TTF_Font* font = styledFont(regularFont, boldFont, italicFont, boldItalicFont, bold, italic);
+    const int previousStyle = TTF_GetFontStyle(font);
+    TTF_SetFontStyle(font, font == regularFont ? fontStyle(bold, italic) : TTF_STYLE_NORMAL);
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+    TTF_SetFontStyle(font, previousStyle);
+    if (surface == nullptr) {
+        return;
+    }
+
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (texture != nullptr) {
+        SDL_Rect dst{x, y, surface->w, surface->h};
+        SDL_RenderCopy(renderer, texture, nullptr, &dst);
+        SDL_DestroyTexture(texture);
+    }
+    SDL_FreeSurface(surface);
+}
+
+struct StyledWord {
+    std::string text;
+    bool bold = false;
+    bool italic = false;
+};
+
+std::vector<StyledWord> splitStyledWords(const std::string& line) {
+    std::vector<StyledWord> words;
+    StyledWord current;
+    bool bold = false;
+    bool italic = false;
+
+    const auto flush = [&]() {
+        if (!current.text.empty()) {
+            words.push_back(current);
+            current.text.clear();
+        }
+    };
+
+    for (size_t index = 0; index < line.size(); ++index) {
+        char style = 0;
+        bool enabled = false;
+        if (inlineStyleMarkerAt(line, index, style, enabled)) {
+            flush();
+            if (style == 'I') {
+                italic = enabled;
+            } else {
+                bold = enabled;
+            }
+            index += 2;
+            continue;
+        }
+
+        const unsigned char value = static_cast<unsigned char>(line[index]);
+        if (std::isspace(value) != 0) {
+            flush();
+            continue;
+        }
+
+        if (current.text.empty()) {
+            current.bold = bold;
+            current.italic = italic;
+        }
+        current.text += line[index];
+    }
+
+    flush();
+    return words;
+}
+
+int drawStyledText(SDL_Renderer* renderer,
+                   TTF_Font* regularFont,
+                   TTF_Font* boldFont,
+                   TTF_Font* italicFont,
+                   TTF_Font* boldItalicFont,
+                   const std::string& text,
+                   int x,
+                   int y,
+                   int wrapWidth,
+                   SDL_Color color,
+                   bool draw) {
+    const std::vector<StyledWord> words = splitStyledWords(text);
+    const int lineHeight = TTF_FontHeight(regularFont);
+    const int spaceWidth = std::max(4, utf8TextWidth(regularFont, " "));
+    int cursorX = x;
+    int cursorY = y;
+
+    for (const StyledWord& word : words) {
+        const int wordWidth =
+            std::max(1, styledTextWidth(regularFont, boldFont, italicFont, boldItalicFont, word.text, word.bold, word.italic));
+        if (cursorX > x && cursorX + wordWidth > x + wrapWidth) {
+            cursorX = x;
+            cursorY += lineHeight;
+        }
+
+        if (draw) {
+            drawStyledWord(renderer, regularFont, boldFont, italicFont, boldItalicFont, word.text, word.bold, word.italic,
+                           cursorX, cursorY, color);
+        }
+        cursorX += wordWidth + spaceWidth;
+    }
+
+    return words.empty() ? lineHeight : cursorY - y + lineHeight;
+}
+
 std::vector<WordRect> layoutWrappedWords(TTF_Font* font,
                                          const std::string& line,
                                          int x,
@@ -200,7 +376,7 @@ std::vector<WordRect> layoutWrappedWords(TTF_Font* font,
                                          int firstWordIndex,
                                          int& usedHeight) {
     std::vector<WordRect> rects;
-    const std::vector<std::string> words = splitWords(line);
+    const std::vector<std::string> words = splitWords(stripInlineStyleMarkers(line));
     const int lineHeight = TTF_FontHeight(font);
     const int spaceWidth = std::max(4, utf8TextWidth(font, " "));
     int cursorX = x;
@@ -273,6 +449,22 @@ TTF_Font* openConfiguredFont(int fontIndex, int fontSize, std::string* loadedPat
 
 TTF_Font* openConfiguredBoldFont(int fontIndex, int fontSize) {
     TTF_Font* font = tryOpenFont(settingsFontBoldPath(fontIndex), fontSize, nullptr);
+    if (font != nullptr) {
+        return font;
+    }
+    return openConfiguredFont(fontIndex, fontSize);
+}
+
+TTF_Font* openConfiguredItalicFont(int fontIndex, int fontSize) {
+    TTF_Font* font = tryOpenFont(settingsFontItalicPath(fontIndex), fontSize, nullptr);
+    if (font != nullptr) {
+        return font;
+    }
+    return openConfiguredFont(fontIndex, fontSize);
+}
+
+TTF_Font* openConfiguredBoldItalicFont(int fontIndex, int fontSize) {
+    TTF_Font* font = tryOpenFont(settingsFontBoldItalicPath(fontIndex), fontSize, nullptr);
     if (font != nullptr) {
         return font;
     }
@@ -366,7 +558,8 @@ bool Renderer::init(std::string& error) {
 bool Renderer::applySettings(const AppSettings& settings, std::string& error) {
     const int fontSize = clampFontSize(settings.fontSize);
     const int fontIndex = clampFontIndex(settings.fontIndex);
-    if (bodyFont_ != nullptr && titleFont_ != nullptr && smallFont_ != nullptr && uiFont_ != nullptr && uiTitleFont_ != nullptr &&
+    if (bodyFont_ != nullptr && bodyBoldFont_ != nullptr && bodyItalicFont_ != nullptr && bodyBoldItalicFont_ != nullptr &&
+        titleFont_ != nullptr && smallFont_ != nullptr && uiFont_ != nullptr && uiTitleFont_ != nullptr &&
         loadedFontSize_ == fontSize && loadedFontIndex_ == fontIndex) {
         return true;
     }
@@ -374,6 +567,18 @@ bool Renderer::applySettings(const AppSettings& settings, std::string& error) {
     if (bodyFont_ != nullptr) {
         TTF_CloseFont(bodyFont_);
         bodyFont_ = nullptr;
+    }
+    if (bodyBoldFont_ != nullptr) {
+        TTF_CloseFont(bodyBoldFont_);
+        bodyBoldFont_ = nullptr;
+    }
+    if (bodyItalicFont_ != nullptr) {
+        TTF_CloseFont(bodyItalicFont_);
+        bodyItalicFont_ = nullptr;
+    }
+    if (bodyBoldItalicFont_ != nullptr) {
+        TTF_CloseFont(bodyBoldItalicFont_);
+        bodyBoldItalicFont_ = nullptr;
     }
     if (titleFont_ != nullptr) {
         TTF_CloseFont(titleFont_);
@@ -395,11 +600,15 @@ bool Renderer::applySettings(const AppSettings& settings, std::string& error) {
     const std::string fontPath = settingsFontPath(fontIndex);
     std::string loadedFontPath;
     bodyFont_ = openConfiguredFont(fontIndex, fontSize, &loadedFontPath);
+    bodyBoldFont_ = openConfiguredBoldFont(fontIndex, fontSize);
+    bodyItalicFont_ = openConfiguredItalicFont(fontIndex, fontSize);
+    bodyBoldItalicFont_ = openConfiguredBoldItalicFont(fontIndex, fontSize);
     titleFont_ = openConfiguredBoldFont(fontIndex, fontSize + 14);
     smallFont_ = TTF_OpenFont(kDefaultFontPath, 18);
     uiFont_ = TTF_OpenFont(kDefaultFontPath, 24);
     uiTitleFont_ = TTF_OpenFont("romfs:/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Bold.ttf", 38);
-    if (bodyFont_ == nullptr || titleFont_ == nullptr || smallFont_ == nullptr || uiFont_ == nullptr || uiTitleFont_ == nullptr) {
+    if (bodyFont_ == nullptr || bodyBoldFont_ == nullptr || bodyItalicFont_ == nullptr || bodyBoldItalicFont_ == nullptr ||
+        titleFont_ == nullptr || smallFont_ == nullptr || uiFont_ == nullptr || uiTitleFont_ == nullptr) {
         error = std::string("Could not load font: ") + fontPath + "\n" + TTF_GetError();
         return false;
     }
@@ -436,6 +645,18 @@ void Renderer::shutdown() {
     if (titleFont_ != nullptr) {
         TTF_CloseFont(titleFont_);
         titleFont_ = nullptr;
+    }
+    if (bodyBoldItalicFont_ != nullptr) {
+        TTF_CloseFont(bodyBoldItalicFont_);
+        bodyBoldItalicFont_ = nullptr;
+    }
+    if (bodyItalicFont_ != nullptr) {
+        TTF_CloseFont(bodyItalicFont_);
+        bodyItalicFont_ = nullptr;
+    }
+    if (bodyBoldFont_ != nullptr) {
+        TTF_CloseFont(bodyBoldFont_);
+        bodyBoldFont_ = nullptr;
     }
     if (bodyFont_ != nullptr) {
         TTF_CloseFont(bodyFont_);
@@ -916,13 +1137,19 @@ void Renderer::drawReaderPageContent(const ReaderState& state, int page, bool re
         }
 
         const bool heading = rawLine.rfind("## ", 0) == 0;
-        const std::string line = heading ? rawLine.substr(3) : rawLine;
+        const std::string line = heading ? stripInlineStyleMarkers(rawLine.substr(3)) : rawLine;
         TTF_Font* font = heading ? titleFont_ : bodyFont_;
-        const int measuredHeight = wrappedTextHeight(font, line, 1040);
+        const int measuredHeight =
+            heading ? wrappedTextHeight(font, line, 1040)
+                    : drawStyledText(renderer_, bodyFont_, bodyBoldFont_, bodyItalicFont_, bodyBoldItalicFont_, line,
+                                     kMargin + xOffset, y, 1040, body, false);
         if (y + measuredHeight > kReaderBottom) {
             break;
         }
-        const int height = drawText(font, line, kMargin + xOffset, y, 1040, body);
+        const int height =
+            heading ? drawText(font, line, kMargin + xOffset, y, 1040, body)
+                    : drawStyledText(renderer_, bodyFont_, bodyBoldFont_, bodyItalicFont_, bodyBoldItalicFont_, line,
+                                     kMargin + xOffset, y, 1040, body, true);
         y += height + (heading ? 16 : 4);
     }
 }
@@ -973,7 +1200,7 @@ void Renderer::selectWordAt(ReaderState& state, bool showChrome, int x, int y, b
         }
 
         const bool heading = rawLine.rfind("## ", 0) == 0;
-        const std::string line = heading ? rawLine.substr(3) : rawLine;
+        const std::string line = heading ? stripInlineStyleMarkers(rawLine.substr(3)) : rawLine;
         TTF_Font* font = heading ? titleFont_ : bodyFont_;
         int height = 0;
         std::vector<WordRect> lineWords = layoutWrappedWords(font, line, kMargin, cursorY, 1040, wordIndex, height);
@@ -1062,7 +1289,7 @@ void Renderer::drawAnnotationHighlights(const ReaderState& state, bool reserveCh
         }
 
         const bool heading = rawLine.rfind("## ", 0) == 0;
-        const std::string line = heading ? rawLine.substr(3) : rawLine;
+        const std::string line = heading ? stripInlineStyleMarkers(rawLine.substr(3)) : rawLine;
         TTF_Font* font = heading ? titleFont_ : bodyFont_;
         int height = 0;
         std::vector<WordRect> lineWords = layoutWrappedWords(font, line, kMargin, cursorY, 1040, wordIndex, height);
@@ -1211,12 +1438,13 @@ void Renderer::drawReader(const ReaderState& state,
         const std::string counter =
             std::to_string(state.page) + " / " + std::to_string(std::max<int>(1, state.pages.size()));
         const int width = utf8TextWidth(smallFont_, counter);
-        SDL_Rect panel{kScreenWidth - width - 80, 654, width + 34, 34};
+        SDL_Rect panel{kScreenWidth - width - 90, 654, width + 44, 36};
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer_, state.darkMode ? 24 : 245, state.darkMode ? 28 : 242, state.darkMode ? 34 : 234, 228);
         SDL_RenderFillRect(renderer_, &panel);
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
-        drawSingleLine(smallFont_, counter, panel.x + 17, panel.y + 8, width + 4, muted);
+        drawSingleLine(smallFont_, counter, panel.x + (panel.w - width) / 2, panel.y + (panel.h - TTF_FontHeight(smallFont_)) / 2,
+                       width + 4, muted);
     }
 
     if (!state.selectedText.empty() && !showSettings && !showAnnotationSheet) {
@@ -1411,13 +1639,14 @@ void Renderer::drawReaderTransition(const ReaderState& state,
         const std::string counter =
             std::to_string(state.page) + " / " + std::to_string(std::max<int>(1, state.pages.size()));
         const int width = utf8TextWidth(smallFont_, counter);
-        SDL_Rect panel{kScreenWidth - width - 80, 654, width + 34, 34};
+        SDL_Rect panel{kScreenWidth - width - 90, 654, width + 44, 36};
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer_, state.darkMode ? 24 : 245, state.darkMode ? 28 : 242,
                                state.darkMode ? 34 : 234, 228);
         SDL_RenderFillRect(renderer_, &panel);
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
-        drawSingleLine(smallFont_, counter, panel.x + 17, panel.y + 8, width + 4, muted);
+        drawSingleLine(smallFont_, counter, panel.x + (panel.w - width) / 2, panel.y + (panel.h - TTF_FontHeight(smallFont_)) / 2,
+                       width + 4, muted);
     }
     (void)settings;
     present();

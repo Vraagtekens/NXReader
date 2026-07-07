@@ -10,7 +10,7 @@
 namespace nxreader {
 namespace {
 
-constexpr int kReaderColumns = 72;
+constexpr int kReaderColumns = 64;
 constexpr const char *kCoverPageMarker = "[[NXREADER_COVER]]";
 constexpr const char *kImagePageMarker = "[[NXREADER_IMAGE:";
 
@@ -35,7 +35,7 @@ int linesPerPageForSettings(const AppSettings &settings) {
 }
 
 int columnsForSettings(const AppSettings &settings) {
-    return std::max(48, kReaderColumns - (settings.fontSize - 28));
+    return std::max(40, kReaderColumns - (settings.fontSize - 28));
 }
 
 void clearSelection(ReaderState &state) {

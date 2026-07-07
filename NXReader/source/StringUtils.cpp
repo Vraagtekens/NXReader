@@ -82,6 +82,87 @@ std::string normalizeZipPath(const std::string &path) {
 
 namespace {
 
+constexpr unsigned char kInlineStyleMarker = 0x1f;
+
+const char *styleMarker(char style, bool enabled) {
+    static const char italicOn[] = "\x1f"
+                                   "I1";
+    static const char italicOff[] = "\x1f"
+                                    "I0";
+    static const char boldOn[] = "\x1f"
+                                 "B1";
+    static const char boldOff[] = "\x1f"
+                                  "B0";
+
+    if (style == 'I') {
+        return enabled ? italicOn : italicOff;
+    }
+    return enabled ? boldOn : boldOff;
+}
+
+bool isInlineStyleMarkerAt(const std::string &text, size_t index) {
+    if (index + 2 >= text.size()) {
+        return false;
+    }
+    if (static_cast<unsigned char>(text[index]) != kInlineStyleMarker) {
+        return false;
+    }
+    const char style = text[index + 1];
+    const char state = text[index + 2];
+    return (style == 'I' || style == 'B') && (state == '0' || state == '1');
+}
+
+size_t visibleByteEnd(const std::string &text, size_t start, size_t end, size_t maxColumns) {
+    size_t index = start;
+    size_t visible = 0;
+    while (index < end && visible < maxColumns) {
+        if (isInlineStyleMarkerAt(text, index)) {
+            index += 3;
+            continue;
+        }
+
+        const unsigned char value = static_cast<unsigned char>(text[index]);
+        size_t step = 1;
+        if ((value & 0xe0) == 0xc0) {
+            step = 2;
+        } else if ((value & 0xf0) == 0xe0) {
+            step = 3;
+        } else if ((value & 0xf8) == 0xf0) {
+            step = 4;
+        }
+        index = std::min(index + step, end);
+        visible += 1;
+    }
+    return index;
+}
+
+void updateInlineStyleState(const std::string &text, size_t start, size_t end, bool &bold, bool &italic) {
+    for (size_t index = start; index < end; ++index) {
+        if (!isInlineStyleMarkerAt(text, index)) {
+            continue;
+        }
+
+        if (text[index + 1] == 'I') {
+            italic = text[index + 2] == '1';
+        } else {
+            bold = text[index + 2] == '1';
+        }
+        index += 2;
+    }
+}
+
+std::string lineWithActiveStyles(const std::string &line, bool bold, bool italic) {
+    std::string styled;
+    if (bold) {
+        styled += styleMarker('B', true);
+    }
+    if (italic) {
+        styled += styleMarker('I', true);
+    }
+    styled += line;
+    return styled;
+}
+
 std::string utf8FromCodepoint(unsigned int codepoint) {
     std::string out;
     if (codepoint <= 0x7F) {
@@ -308,6 +389,10 @@ std::string stripTagsToText(const std::string &html) {
                 appendBreak(text, 1, lastWasSpace);
             } else if (bareTag == "td" || bareTag == "th") {
                 appendSpace(text, lastWasSpace);
+            } else if (bareTag == "em" || bareTag == "i") {
+                text += styleMarker('I', !closing);
+            } else if (bareTag == "strong" || bareTag == "b") {
+                text += styleMarker('B', !closing);
             }
             index = tagEnd;
             continue;
@@ -327,6 +412,21 @@ std::string stripTagsToText(const std::string &html) {
     }
 
     return decodeHtmlEntities(text);
+}
+
+std::string stripInlineStyleMarkers(const std::string &text) {
+    std::string stripped;
+    stripped.reserve(text.size());
+
+    for (size_t index = 0; index < text.size(); ++index) {
+        if (isInlineStyleMarkerAt(text, index)) {
+            index += 2;
+            continue;
+        }
+        stripped += text[index];
+    }
+
+    return stripped;
 }
 
 std::vector<std::string> paginateText(const std::string &text, size_t charsPerPage) {
@@ -369,9 +469,14 @@ std::vector<std::string> wrapTextLines(const std::string &text, size_t maxColumn
 
         size_t hardBreak = text.find('\n', lineStart);
         size_t segmentEnd = hardBreak == std::string::npos ? text.size() : hardBreak;
+        bool activeBold = false;
+        bool activeItalic = false;
 
         while (lineStart < segmentEnd) {
-            size_t lineEnd = std::min(lineStart + maxColumns, segmentEnd);
+            size_t lineEnd = visibleByteEnd(text, lineStart, segmentEnd, maxColumns);
+            if (lineEnd <= lineStart) {
+                lineEnd = std::min(lineStart + maxColumns, segmentEnd);
+            }
             if (lineEnd < segmentEnd) {
                 const size_t space = text.rfind(' ', lineEnd);
                 if (space != std::string::npos && space > lineStart) {
@@ -379,7 +484,8 @@ std::vector<std::string> wrapTextLines(const std::string &text, size_t maxColumn
                 }
             }
 
-            lines.push_back(text.substr(lineStart, lineEnd - lineStart));
+            lines.push_back(lineWithActiveStyles(text.substr(lineStart, lineEnd - lineStart), activeBold, activeItalic));
+            updateInlineStyleState(text, lineStart, lineEnd, activeBold, activeItalic);
             lineStart = lineEnd;
             while (lineStart < segmentEnd && text[lineStart] == ' ') {
                 lineStart += 1;

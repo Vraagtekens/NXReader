@@ -13,6 +13,17 @@ struct LibraryView: View {
                         .font(.largeTitle.bold())
                     Spacer()
                     Button {
+                        Task {
+                            await store.refreshFromBackend()
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 17, weight: .bold))
+                            .frame(width: 38, height: 38)
+                            .background(.regularMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    Button {
                         isImporterPresented = true
                     } label: {
                         Image(systemName: "plus")
@@ -24,10 +35,19 @@ struct LibraryView: View {
                 }
                 .padding(.top, 18)
 
+                if let syncError = store.syncError {
+                    Text(syncError)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 18)], alignment: .leading, spacing: 22) {
                     ForEach(store.books) { book in
                         NavigationLink {
-                            ReaderView(book: book, store: store)
+                            BookOpenView(book: book, store: store)
                         } label: {
                             SmallBookCard(book: book)
                         }

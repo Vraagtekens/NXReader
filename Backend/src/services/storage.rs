@@ -50,3 +50,21 @@ pub async fn put_epub(
 
     Ok(())
 }
+
+pub async fn get_epub(client: &Client, bucket: &str, key: &str) -> Result<Bytes, String> {
+    let object = client
+        .get_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let bytes = object
+        .body
+        .collect()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_bytes();
+
+    Ok(bytes)
+}

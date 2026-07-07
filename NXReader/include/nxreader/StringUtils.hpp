@@ -14,6 +14,7 @@ std::string normalizeZipPath(const std::string &path);
 std::string consoleSafeText(const std::string &text);
 std::string decodeHtmlEntities(const std::string &text);
 std::string stripTagsToText(const std::string &html);
+std::string stripInlineStyleMarkers(const std::string &text);
 std::vector<std::string> paginateText(const std::string &text, size_t charsPerPage);
 std::vector<std::string> wrapTextLines(const std::string &text, size_t maxColumns);
 

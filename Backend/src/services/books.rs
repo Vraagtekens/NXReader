@@ -82,3 +82,15 @@ pub async fn get(pool: &Pool<Postgres>, book_id: Uuid) -> Result<Option<Book>, s
     .fetch_optional(pool)
     .await
 }
+
+pub async fn list(pool: &Pool<Postgres>) -> Result<Vec<Book>, sqlx::Error> {
+    sqlx::query_as::<_, Book>(
+        r#"
+        SELECT id, content_hash, title, author, file_name, storage_key, mime_type, file_size_bytes, created_at, updated_at
+        FROM books
+        ORDER BY updated_at DESC
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+}
