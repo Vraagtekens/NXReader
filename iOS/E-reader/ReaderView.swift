@@ -15,9 +15,13 @@ struct ReaderView: View {
     @State private var activeSheet: ReaderSheet?
     @State private var isMenuExpanded = false
     @State private var renderedPages: [ReaderPage] = []
+    @State private var readerSize: CGSize = .zero
+    @State private var paginationTask: Task<Void, Never>?
+    @State private var liveFontSize = 22.0
+    @State private var isPaginating = false
 
     private var fontSize: CGFloat {
-        CGFloat(storedFontSize)
+        CGFloat(liveFontSize)
     }
 
     private var fontFamily: ReaderFont {
@@ -36,11 +40,30 @@ struct ReaderView: View {
         useDarkMode ? .dark : .light
     }
 
+    private var textAreaSize: CGSize {
+        let screen = UIScreen.main.bounds
+        let width = readerSize.width > 100 ? readerSize.width : screen.width
+        let height = readerSize.height > 500 ? readerSize.height : screen.height
+        return CGSize(
+            width: max(1, width - (ReaderLayout.horizontalPadding * 2)),
+            height: max(1, height - ReaderLayout.topPadding - ReaderLayout.bottomPadding)
+        )
+    }
+
     var body: some View {
         ZStack {
             theme.background.ignoresSafeArea()
 
             TabView(selection: $pageIndex) {
+                ReaderCoverPage(book: book, theme: theme)
+                    .tag(0)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showChrome.toggle()
+                        }
+                    }
+
                 ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
                     ReaderPageView(
                         page: page,
@@ -50,7 +73,7 @@ struct ReaderView: View {
                         highlights: book.highlights,
                         selectedText: $selectedText
                     )
-                    .tag(index)
+                    .tag(index + 1)
                     .contentShape(Rectangle())
                     .onTapGesture {
                         withAnimation(.easeInOut(duration: 0.18)) {
@@ -65,8 +88,7 @@ struct ReaderView: View {
             if showChrome {
                 ReaderChrome(
                     title: book.title,
-                    pageIndex: pageIndex,
-                    pageCount: max(1, pages.count),
+                    pageLabel: pageLabel,
                     selectedText: selectedText,
                     isMenuExpanded: $isMenuExpanded,
                     lockRotation: lockRotation,
@@ -79,41 +101,48 @@ struct ReaderView: View {
                 .transition(.opacity)
             }
         }
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: ReaderSizePreferenceKey.self, value: proxy.size)
+            }
+        }
+        .onPreferenceChange(ReaderSizePreferenceKey.self) { size in
+            guard abs(size.width - readerSize.width) > 1 || abs(size.height - readerSize.height) > 1 else {
+                return
+            }
+            readerSize = size
+            rebuildPages(targetPageIndex: pageIndex)
+        }
         .preferredColorScheme(useDarkMode ? .dark : .light)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .onAppear {
-            rebuildPages()
+            liveFontSize = storedFontSize
             book.lastOpenedAt = .now
-            pageIndex = min(max(book.currentPage - 1, 0), max(0, pages.count - 1))
-            book.pageCount = max(1, pages.count)
+            rebuildPages(targetPageIndex: max(book.currentPage, 0))
             OrientationController.shared.setRotationLocked(lockRotation)
         }
         .onChange(of: pageIndex) { _, newValue in
             selectedText = ""
-            book.currentPage = newValue + 1
+            book.currentPage = max(1, newValue)
             book.pageCount = max(1, pages.count)
         }
         .onChange(of: storedFontSize) { _, _ in
-            rebuildPages()
-            pageIndex = min(pageIndex, max(0, pages.count - 1))
-            book.pageCount = max(1, pages.count)
+            liveFontSize = storedFontSize
+            rebuildPages(delayNanoseconds: 120_000_000, targetPageIndex: pageIndex)
         }
         .onChange(of: storedFontFamily) { _, _ in
-            rebuildPages()
-            pageIndex = min(pageIndex, max(0, pages.count - 1))
-            book.pageCount = max(1, pages.count)
+            rebuildPages(delayNanoseconds: 120_000_000)
         }
         .onChange(of: book.sampleText) { _, _ in
             rebuildPages()
-            pageIndex = min(pageIndex, max(0, pages.count - 1))
-            book.pageCount = max(1, pages.count)
         }
         .onChange(of: lockRotation) { _, newValue in
             OrientationController.shared.setRotationLocked(newValue)
         }
         .onDisappear {
+            paginationTask?.cancel()
             OrientationController.shared.setRotationLocked(false)
         }
         .sheet(item: $activeSheet) { sheet in
@@ -124,6 +153,7 @@ struct ReaderView: View {
                     .presentationDragIndicator(.visible)
             case .settings:
                 ReaderSettingsSheet(
+                    liveFontSize: $liveFontSize,
                     storedFontSize: $storedFontSize,
                     storedFontFamily: $storedFontFamily,
                     useDarkMode: $useDarkMode
@@ -143,11 +173,73 @@ struct ReaderView: View {
         selectedText = ""
     }
 
-    private func rebuildPages() {
-        renderedPages = ReaderPaginator.pages(
-            from: book.sampleText,
-            targetCharacters: ReaderPaginator.targetCharacters(for: fontSize)
-        )
+    private func rebuildPages(delayNanoseconds: UInt64 = 0, targetPageIndex: Int? = nil) {
+        paginationTask?.cancel()
+        isPaginating = true
+
+        let text = book.sampleText
+        let size = CGFloat(storedFontSize)
+        let family = fontFamily
+        let area = textAreaSize
+        let destinationIndex = targetPageIndex ?? pageIndex
+
+        paginationTask = Task {
+            if delayNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: delayNanoseconds)
+                guard !Task.isCancelled else {
+                    return
+                }
+            }
+
+            let quickPages = await Task.detached(priority: .userInitiated) {
+                ReaderFastPaginator.pages(
+                    from: text,
+                    fontSize: size,
+                    pageSize: area
+                )
+            }.value
+
+            guard !Task.isCancelled else {
+                return
+            }
+
+            renderedPages = quickPages
+            pageIndex = min(destinationIndex, quickPages.count)
+            book.pageCount = max(1, quickPages.count)
+
+            let builtPages = await Task.detached(priority: .userInitiated) {
+                ReaderPaginator.pages(
+                    from: text,
+                    fontSize: size,
+                    fontFamily: family,
+                    pageSize: area
+                )
+            }.value
+
+            guard !Task.isCancelled else {
+                return
+            }
+
+            renderedPages = builtPages
+            pageIndex = min(pageIndex, builtPages.count)
+            book.pageCount = max(1, builtPages.count)
+            isPaginating = false
+        }
+    }
+
+    private var pageLabel: String {
+        if isPaginating, renderedPages.isEmpty {
+            return "Loading..."
+        }
+        return pageIndex == 0 ? "Cover" : "Page \(pageIndex) of \(max(1, pages.count))"
+    }
+}
+
+private struct ReaderSizePreferenceKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
     }
 }
 
@@ -158,10 +250,15 @@ private enum ReaderSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
+private enum ReaderLayout {
+    static let horizontalPadding: CGFloat = 30
+    static let topPadding: CGFloat = 94
+    static let bottomPadding: CGFloat = 52
+}
+
 private struct ReaderChrome: View {
     let title: String
-    let pageIndex: Int
-    let pageCount: Int
+    let pageLabel: String
     let selectedText: String
     @Binding var isMenuExpanded: Bool
     let lockRotation: Bool
@@ -210,7 +307,7 @@ private struct ReaderChrome: View {
             HStack(alignment: .bottom) {
                 Spacer()
 
-                Text("Page \(pageIndex + 1) of \(pageCount)")
+                Text(pageLabel)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 12)
@@ -283,6 +380,40 @@ private struct ReaderMenuButton: View {
     }
 }
 
+private struct ReaderCoverPage: View {
+    @ObservedObject var book: ReaderBook
+    let theme: ReaderTheme
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 20) {
+                Spacer(minLength: 40)
+
+                BookCover(
+                    book: book,
+                    width: min(proxy.size.width * 0.58, 260),
+                    height: min(proxy.size.width * 0.58, 260) * 1.46
+                )
+
+                VStack(spacing: 7) {
+                    Text(book.title)
+                        .font(.title3.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Color(theme.textUIColor))
+                    Text(book.author)
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 32)
+
+                Spacer(minLength: 60)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
 private struct ReaderPageView: View {
     let page: ReaderPage
     let fontSize: CGFloat
@@ -292,18 +423,22 @@ private struct ReaderPageView: View {
     @Binding var selectedText: String
 
     var body: some View {
-        SelectableReaderText(
-            blocks: page.blocks,
-            fontSize: fontSize,
-            fontFamily: fontFamily,
-            theme: theme,
-            highlights: highlights,
-            selectedText: $selectedText
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.horizontal, 20)
-        .padding(.top, 86)
-        .padding(.bottom, 82)
+        GeometryReader { proxy in
+            SelectableReaderText(
+                blocks: page.blocks,
+                fontSize: fontSize,
+                fontFamily: fontFamily,
+                theme: theme,
+                highlights: highlights,
+                selectedText: $selectedText
+            )
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .clipped()
+        }
+        .padding(.horizontal, ReaderLayout.horizontalPadding)
+        .padding(.top, ReaderLayout.topPadding)
+        .padding(.bottom, ReaderLayout.bottomPadding)
+        .clipped()
     }
 }
 
@@ -316,7 +451,7 @@ private struct SelectableReaderText: UIViewRepresentable {
     @Binding var selectedText: String
 
     func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
+        let textView = ReaderLockedTextView()
         textView.delegate = context.coordinator
         textView.isEditable = false
         textView.isSelectable = true
@@ -326,8 +461,13 @@ private struct SelectableReaderText: UIViewRepresentable {
         textView.textContainer.lineFragmentPadding = 0
         textView.textContainer.widthTracksTextView = true
         textView.textContainer.lineBreakMode = .byWordWrapping
+        textView.contentInset = .zero
+        textView.scrollIndicatorInsets = .zero
+        textView.contentInsetAdjustmentBehavior = .never
         textView.showsVerticalScrollIndicator = false
         textView.adjustsFontForContentSizeCategory = false
+        textView.clipsToBounds = true
+        textView.layer.masksToBounds = true
         textView.setContentCompressionResistancePriority(.required, for: .vertical)
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return textView
@@ -343,8 +483,10 @@ private struct SelectableReaderText: UIViewRepresentable {
         textView.tintColor = theme.tintUIColor
         textView.textContainer.size = CGSize(
             width: max(1, textView.bounds.width),
-            height: CGFloat.greatestFiniteMagnitude
+            height: max(1, textView.bounds.height)
         )
+        textView.contentInset = .zero
+        textView.setContentOffset(.zero, animated: false)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -357,7 +499,7 @@ private struct SelectableReaderText: UIViewRepresentable {
         for (index, block) in blocks.enumerated() {
             output.append(block.attributedText(fontSize: fontSize, fontFamily: fontFamily, theme: theme))
             if index < blocks.count - 1 {
-                output.append(NSAttributedString(string: "\n\n"))
+                output.append(NSAttributedString(string: "\n"))
             }
         }
 
@@ -412,7 +554,24 @@ private struct SelectableReaderText: UIViewRepresentable {
             }
 
             parent.selectedText = String(textView.text[range])
+            textView.setContentOffset(.zero, animated: false)
+            DispatchQueue.main.async {
+                textView.setContentOffset(.zero, animated: false)
+            }
         }
+    }
+}
+
+private final class ReaderLockedTextView: UITextView {
+    override func setContentOffset(_ contentOffset: CGPoint, animated: Bool) {
+        super.setContentOffset(.zero, animated: false)
+    }
+
+    override func scrollRangeToVisible(_ range: NSRange) {}
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        super.setContentOffset(.zero, animated: false)
     }
 }
 
@@ -433,7 +592,7 @@ private struct ReaderContentsSheet: View {
                             Text(chapter.title)
                                 .font(.body)
                                 .foregroundStyle(.primary)
-                            Text("Page \(chapter.pageIndex + 1)")
+                            Text("Page \(chapter.pageIndex)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -452,6 +611,7 @@ private struct ReaderContentsSheet: View {
 }
 
 private struct ReaderSettingsSheet: View {
+    @Binding var liveFontSize: Double
     @Binding var storedFontSize: Double
     @Binding var storedFontFamily: String
     @Binding var useDarkMode: Bool
@@ -462,17 +622,28 @@ private struct ReaderSettingsSheet: View {
                 Section {
                     HStack {
                         Button {
-                            storedFontSize = max(16, storedFontSize - 2)
+                            liveFontSize = max(16, liveFontSize - 2)
+                            storedFontSize = liveFontSize
                         } label: {
                             Image(systemName: "textformat.size.smaller")
                                 .frame(width: 34, height: 34)
                         }
                         .buttonStyle(.borderless)
 
-                        Slider(value: $storedFontSize, in: 16...34, step: 1)
+                        Slider(
+                            value: $liveFontSize,
+                            in: 16...34,
+                            step: 1,
+                            onEditingChanged: { isEditing in
+                                if !isEditing {
+                                    storedFontSize = liveFontSize
+                                }
+                            }
+                        )
 
                         Button {
-                            storedFontSize = min(34, storedFontSize + 2)
+                            liveFontSize = min(34, liveFontSize + 2)
+                            storedFontSize = liveFontSize
                         } label: {
                             Image(systemName: "textformat.size.larger")
                                 .frame(width: 34, height: 34)
@@ -512,6 +683,7 @@ private struct ReaderTextBlock: Identifiable {
         case heading1
         case heading2
         case heading3
+        case metadata
         case listItem
         case paragraph
     }
@@ -535,8 +707,12 @@ private struct ReaderTextBlock: Identifiable {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = lineSpacing
         paragraph.paragraphSpacing = paragraphSpacing
-        paragraph.alignment = .natural
+        paragraph.alignment = kind.isCentered ? .center : .natural
         paragraph.lineBreakMode = .byWordWrapping
+        if kind == .listItem {
+            paragraph.firstLineHeadIndent = 10
+            paragraph.headIndent = 28
+        }
 
         let output = NSMutableAttributedString()
         var index = markdown.startIndex
@@ -583,6 +759,8 @@ private struct ReaderTextBlock: Identifiable {
         switch kind {
         case .heading1, .heading2, .heading3:
             2
+        case .metadata:
+            4
         case .listItem, .paragraph:
             7
         }
@@ -594,8 +772,10 @@ private struct ReaderTextBlock: Identifiable {
             18
         case .heading2, .heading3:
             14
+        case .metadata:
+            8
         case .listItem, .paragraph:
-            9
+            5
         }
     }
 
@@ -607,6 +787,8 @@ private struct ReaderTextBlock: Identifiable {
             fontSize + 8
         case .heading3:
             fontSize + 4
+        case .metadata:
+            fontSize - 1
         case .listItem, .paragraph:
             fontSize
         }
@@ -625,6 +807,8 @@ private struct ReaderTextBlock: Identifiable {
                     ReaderTextBlock(kind: .heading2, markdown: markdownBody(raw, markerLength: 3))
                 case .heading3:
                     ReaderTextBlock(kind: .heading3, markdown: markdownBody(raw, markerLength: 4))
+                case .metadata:
+                    ReaderTextBlock(kind: .metadata, markdown: raw)
                 case .listItem:
                     ReaderTextBlock(kind: .listItem, markdown: listBody(raw))
                 case .paragraph:
@@ -643,6 +827,14 @@ private struct ReaderTextBlock: Identifiable {
         }
         if raw.hasPrefix("### ") || lowered.contains(" h3") || lowered.hasPrefix("titre h3") {
             return .heading3
+        }
+        if lowered.hasPrefix("by ")
+            || lowered.hasPrefix("author:")
+            || lowered.hasPrefix("writer:")
+            || lowered.hasPrefix("auteur:")
+            || lowered.hasPrefix("auteur ")
+        {
+            return .metadata
         }
         if raw.hasPrefix("- ") || lowered.hasPrefix("liste:") {
             return .listItem
@@ -674,6 +866,7 @@ private extension ReaderTextBlock.Kind {
         case .heading1: "h1"
         case .heading2: "h2"
         case .heading3: "h3"
+        case .metadata: "meta"
         case .listItem: "li"
         case .paragraph: "p"
         }
@@ -682,6 +875,15 @@ private extension ReaderTextBlock.Kind {
     var isHeading: Bool {
         switch self {
         case .heading1, .heading2, .heading3:
+            true
+        case .metadata, .listItem, .paragraph:
+            false
+        }
+    }
+
+    var isCentered: Bool {
+        switch self {
+        case .heading1, .heading2, .heading3, .metadata:
             true
         case .listItem, .paragraph:
             false
@@ -699,9 +901,9 @@ private struct ReaderChapter: Identifiable {
             guard let heading = page.blocks.first(where: { $0.kind.isHeading }) else {
                 return nil
             }
-            return ReaderChapter(title: heading.plainTitle, pageIndex: index)
+            return ReaderChapter(title: heading.plainTitle, pageIndex: index + 1)
         }
-        return chapters.isEmpty ? [ReaderChapter(title: "Start", pageIndex: 0)] : chapters
+        return chapters.isEmpty ? [ReaderChapter(title: "Start", pageIndex: 1)] : chapters
     }
 }
 
@@ -785,14 +987,12 @@ private struct ReaderTheme {
     )
 }
 
-private enum ReaderPaginator {
-    static func targetCharacters(for fontSize: CGFloat) -> Int {
-        let base = 1_350
-        let adjusted = Double(base) * pow(22 / Double(fontSize), 1.65)
-        return max(520, min(1_800, Int(adjusted)))
-    }
-
-    static func pages(from text: String, targetCharacters: Int) -> [ReaderPage] {
+private enum ReaderFastPaginator {
+    static func pages(
+        from text: String,
+        fontSize: CGFloat,
+        pageSize: CGSize
+    ) -> [ReaderPage] {
         let paragraphs = text
             .components(separatedBy: "\n\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -803,33 +1003,208 @@ private enum ReaderPaginator {
         }
 
         var pages: [ReaderPage] = []
-        var current = ""
+        var current: [String] = []
+        var currentLines = 0
+        let budget = PageBudget(fontSize: fontSize, pageSize: pageSize)
 
         for paragraph in paragraphs {
-            let paragraphTarget = paragraph.hasPrefix("#") ? max(120, targetCharacters / 3) : targetCharacters
-            if paragraph.count > paragraphTarget {
+            if isChapterHeading(paragraph), !current.isEmpty {
                 flush(&current, into: &pages)
-                split(paragraph, targetCharacters: targetCharacters, into: &pages)
+                currentLines = 0
+            }
+
+            let paragraphLines = estimatedLines(for: paragraph, budget: budget)
+            let separatorLines = current.isEmpty ? 0 : 1
+
+            if currentLines + separatorLines + paragraphLines <= budget.maxLines {
+                current.append(paragraph)
+                currentLines += separatorLines + paragraphLines
                 continue
             }
 
-            let separator = current.isEmpty ? "" : "\n\n"
-            if current.count + separator.count + paragraph.count > targetCharacters {
+            if !current.isEmpty {
                 flush(&current, into: &pages)
+                currentLines = 0
             }
 
-            current += (current.isEmpty ? "" : "\n\n") + paragraph
+            appendSplitting(paragraph, current: &current, currentLines: &currentLines, into: &pages, budget: budget)
         }
 
         flush(&current, into: &pages)
+        return pages.isEmpty ? [ReaderPage(id: 0, text: text, blocks: ReaderTextBlock.blocks(from: text))] : pages
+    }
+
+    private static func appendSplitting(
+        _ paragraph: String,
+        current: inout [String],
+        currentLines: inout Int,
+        into pages: inout [ReaderPage],
+        budget: PageBudget
+    ) {
+        let words = paragraph.split(separator: " ").map(String.init)
+        var chunk: [String] = []
+        var chunkLines = 0
+
+        for word in words {
+            let candidate = (chunk + [word]).joined(separator: " ")
+            let candidateLines = estimatedLines(for: candidate, budget: budget)
+            if candidateLines > budget.maxLines, !chunk.isEmpty {
+                current = [chunk.joined(separator: " ")]
+                flush(&current, into: &pages)
+                chunk = [word]
+                chunkLines = estimatedLines(for: word, budget: budget)
+            } else {
+                chunk.append(word)
+                chunkLines = candidateLines
+            }
+        }
+
+        if !chunk.isEmpty {
+            current = [chunk.joined(separator: " ")]
+            currentLines = chunkLines
+        }
+    }
+
+    private static func flush(_ paragraphs: inout [String], into pages: inout [ReaderPage]) {
+        let text = paragraphs.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            pages.append(ReaderPage(id: pages.count, text: text, blocks: ReaderTextBlock.blocks(from: text)))
+        }
+        paragraphs = []
+    }
+
+    private static func estimatedLines(for paragraph: String, budget: PageBudget) -> Int {
+        let characters = max(1, paragraph.count)
+        let lines = Int(ceil(Double(characters) / Double(budget.charactersPerLine)))
+        if isChapterHeading(paragraph) {
+            return lines + 2
+        }
+        return lines
+    }
+
+    private static func isChapterHeading(_ paragraph: String) -> Bool {
+        let lowered = paragraph.lowercased()
+        return paragraph.hasPrefix("# ")
+            || lowered.contains(" h1")
+            || lowered.hasPrefix("chapter ")
+            || lowered.hasPrefix("chapter:")
+            || lowered.hasPrefix("chapitre ")
+            || lowered.hasPrefix("chapitre:")
+    }
+
+    private struct PageBudget {
+        let charactersPerLine: Int
+        let maxLines: Int
+
+        init(fontSize: CGFloat, pageSize: CGSize) {
+            let averageCharacterWidth = max(6, fontSize * 0.50)
+            charactersPerLine = max(18, Int(pageSize.width / averageCharacterWidth))
+
+            let lineHeight = max(21, fontSize * 1.34)
+            maxLines = max(8, Int((pageSize.height - 8) / lineHeight))
+        }
+    }
+}
+
+private enum ReaderPaginator {
+    static func pages(
+        from text: String,
+        fontSize: CGFloat,
+        fontFamily: ReaderFont,
+        pageSize: CGSize
+    ) -> [ReaderPage] {
+        let paragraphs = text
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !paragraphs.isEmpty else {
+            return [ReaderPage(id: 0, text: "", blocks: [])]
+        }
+
+        var pages: [ReaderPage] = []
+        var currentParagraphs: [String] = []
+        var heightCache: [String: CGFloat] = [:]
+
+        for paragraph in paragraphs {
+            if isChapterHeading(paragraph), !currentParagraphs.isEmpty {
+                flush(&currentParagraphs, into: &pages)
+            }
+
+            if fits(
+                currentParagraphs + [paragraph],
+                fontSize: fontSize,
+                fontFamily: fontFamily,
+                pageSize: pageSize,
+                heightCache: &heightCache
+            ) {
+                currentParagraphs.append(paragraph)
+                continue
+            }
+
+            appendSplitting(
+                paragraph,
+                currentParagraphs: &currentParagraphs,
+                into: &pages,
+                fontSize: fontSize,
+                fontFamily: fontFamily,
+                pageSize: pageSize,
+                heightCache: &heightCache
+            )
+        }
+
+        flush(&currentParagraphs, into: &pages)
         if pages.isEmpty {
             return [ReaderPage(id: 0, text: text, blocks: ReaderTextBlock.blocks(from: text))]
         }
         return pages
     }
 
-    private static func flush(_ current: inout String, into pages: inout [ReaderPage]) {
-        let text = current.trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func appendSplitting(
+        _ paragraph: String,
+        currentParagraphs: inout [String],
+        into pages: inout [ReaderPage],
+        fontSize: CGFloat,
+        fontFamily: ReaderFont,
+        pageSize: CGSize,
+        heightCache: inout [String: CGFloat]
+    ) {
+        let words = paragraph.split(separator: " ").map(String.init)
+        var index = 0
+
+        while index < words.count {
+            let fitCount = fittingWordCount(
+                words: words,
+                startIndex: index,
+                baseParagraphs: currentParagraphs,
+                fontSize: fontSize,
+                fontFamily: fontFamily,
+                pageSize: pageSize,
+                heightCache: &heightCache
+            )
+
+            if fitCount == 0, !currentParagraphs.isEmpty {
+                flush(&currentParagraphs, into: &pages)
+                continue
+            }
+
+            if fitCount > 0 {
+                let chunk = words[index..<(index + fitCount)].joined(separator: " ")
+                currentParagraphs.append(chunk)
+                index += fitCount
+                if index < words.count {
+                    flush(&currentParagraphs, into: &pages)
+                }
+            } else {
+                currentParagraphs = [words[index]]
+                flush(&currentParagraphs, into: &pages)
+                index += 1
+            }
+        }
+    }
+
+    private static func flush(_ paragraphs: inout [String], into pages: inout [ReaderPage]) {
+        let text = paragraphs.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty {
             pages.append(
                 ReaderPage(
@@ -839,24 +1214,117 @@ private enum ReaderPaginator {
                 )
             )
         }
-        current = ""
+        paragraphs = []
     }
 
-    private static func split(
-        _ paragraph: String,
-        targetCharacters: Int,
-        into pages: inout [ReaderPage]
-    ) {
-        var chunk = ""
-        for word in paragraph.split(separator: " ") {
-            let next = chunk.isEmpty ? String(word) : "\(chunk) \(word)"
-            if next.count > targetCharacters {
-                flush(&chunk, into: &pages)
-                chunk = String(word)
+    private static func fittingWordCount(
+        words: [String],
+        startIndex: Int,
+        baseParagraphs: [String],
+        fontSize: CGFloat,
+        fontFamily: ReaderFont,
+        pageSize: CGSize,
+        heightCache: inout [String: CGFloat]
+    ) -> Int {
+        var low = 0
+        var high = words.count - startIndex
+        var best = 0
+
+        while low <= high {
+            let middle = (low + high) / 2
+            if middle == 0 {
+                low = 1
+                continue
+            }
+
+            let chunk = words[startIndex..<(startIndex + middle)].joined(separator: " ")
+            if fits(
+                baseParagraphs + [chunk],
+                fontSize: fontSize,
+                fontFamily: fontFamily,
+                pageSize: pageSize,
+                heightCache: &heightCache
+            ) {
+                best = middle
+                low = middle + 1
             } else {
-                chunk = next
+                high = middle - 1
             }
         }
-        flush(&chunk, into: &pages)
+
+        return best
     }
+
+    private static func fits(
+        _ paragraphs: [String],
+        fontSize: CGFloat,
+        fontFamily: ReaderFont,
+        pageSize: CGSize,
+        heightCache: inout [String: CGFloat]
+    ) -> Bool {
+        measuredHeight(
+            for: paragraphs,
+            fontSize: fontSize,
+            fontFamily: fontFamily,
+            pageSize: pageSize,
+            heightCache: &heightCache
+        ) <= max(1, pageSize.height - 6)
+    }
+
+    private static func measuredHeight(
+        for paragraphs: [String],
+        fontSize: CGFloat,
+        fontFamily: ReaderFont,
+        pageSize: CGSize,
+        heightCache: inout [String: CGFloat]
+    ) -> CGFloat {
+        let text = paragraphs.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            return 0
+        }
+
+        if let cached = heightCache[text] {
+            return cached
+        }
+
+        let attributed = attributedText(
+            for: ReaderTextBlock.blocks(from: text),
+            fontSize: fontSize,
+            fontFamily: fontFamily
+        )
+        let bounds = attributed.boundingRect(
+            with: CGSize(width: max(1, pageSize.width), height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil
+        )
+        let height = ceil(bounds.height)
+        heightCache[text] = height
+        return height
+    }
+
+    private static func attributedText(
+        for blocks: [ReaderTextBlock],
+        fontSize: CGFloat,
+        fontFamily: ReaderFont
+    ) -> NSAttributedString {
+        let output = NSMutableAttributedString()
+        for (index, block) in blocks.enumerated() {
+            output.append(block.attributedText(fontSize: fontSize, fontFamily: fontFamily, theme: .dark))
+            if index < blocks.count - 1 {
+                output.append(NSAttributedString(string: "\n"))
+            }
+        }
+        return output
+    }
+
+    private static func isChapterHeading(_ paragraph: String) -> Bool {
+        let lowered = paragraph.lowercased()
+        return paragraph.hasPrefix("# ")
+            || lowered.contains(" h1")
+            || lowered.hasPrefix("chapter ")
+            || lowered.hasPrefix("chapter:")
+            || lowered.hasPrefix("chapitre ")
+            || lowered.hasPrefix("chapitre:")
+    }
+
 }
