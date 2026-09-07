@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 struct LibraryView: View {
     @ObservedObject var store: LibraryStore
     @State private var isImporterPresented = false
+    @State private var bookToRename: ReaderBook?
+    @State private var renameTitle = ""
 
     var body: some View {
         ScrollView {
@@ -26,12 +28,19 @@ struct LibraryView: View {
                     Button {
                         isImporterPresented = true
                     } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 18, weight: .bold))
-                            .frame(width: 38, height: 38)
-                            .background(.regularMaterial, in: Circle())
+                        if store.uploadingBook {
+                            ProgressView()
+                                .frame(width: 38, height: 38)
+                                .background(.regularMaterial, in: Circle())
+                        } else {
+                            Image(systemName: "plus")
+                                .font(.system(size: 18, weight: .bold))
+                                .frame(width: 38, height: 38)
+                                .background(.regularMaterial, in: Circle())
+                        }
                     }
                     .buttonStyle(.plain)
+                    .disabled(store.uploadingBook)
                 }
                 .padding(.top, 18)
 
@@ -49,7 +58,26 @@ struct LibraryView: View {
                         NavigationLink {
                             BookOpenView(book: book, store: store)
                         } label: {
-                            SmallBookCard(book: book)
+                            SmallBookCard(
+                                book: book,
+                                onRemove: {
+                                    Task {
+                                        await store.removeBook(book)
+                                    }
+                                },
+                                onRename: {
+                                    renameTitle = book.title
+                                    bookToRename = book
+                                },
+                                onDownload: {
+                                    Task {
+                                        _ = await store.ensureDownloaded(book)
+                                    }
+                                },
+                                onMarkFinished: {
+                                    store.markFinished(book)
+                                }
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -61,10 +89,47 @@ struct LibraryView: View {
         .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.epub]) { result in
             importBook(result)
         }
+        .alert("Rename Book", isPresented: renameAlertBinding) {
+            TextField("Title", text: $renameTitle)
+            Button("Cancel", role: .cancel) {
+                bookToRename = nil
+            }
+            Button("Rename") {
+                if let bookToRename {
+                    store.renameBook(bookToRename, title: renameTitle)
+                }
+                bookToRename = nil
+            }
+        }
+    }
+
+    private var renameAlertBinding: Binding<Bool> {
+        Binding(
+            get: { bookToRename != nil },
+            set: { isPresented in
+                if !isPresented {
+                    bookToRename = nil
+                }
+            }
+        )
     }
 
     private func importBook(_ result: Result<URL, Error>) {
         guard case .success(let url) = result else { return }
+
+        Task {
+            do {
+                let localURL = try copyToTemporaryImportURL(url)
+                await store.uploadImportedBook(fileURL: localURL)
+            } catch {
+                await MainActor.run {
+                    store.syncError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func copyToTemporaryImportURL(_ url: URL) throws -> URL {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
             if didAccess {
@@ -72,7 +137,17 @@ struct LibraryView: View {
             }
         }
 
-        store.addImportedBook(fileName: url.lastPathComponent)
+        let importsDirectory = FileManager.default
+            .temporaryDirectory
+            .appendingPathComponent("NXReaderImports", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: importsDirectory, withIntermediateDirectories: true)
+
+        let destination = importsDirectory
+            .appendingPathComponent(url.lastPathComponent, isDirectory: false)
+
+        try FileManager.default.copyItem(at: url, to: destination)
+        return destination
     }
 }
 

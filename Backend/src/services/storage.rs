@@ -39,11 +39,30 @@ pub async fn put_epub(
     key: &str,
     body: Bytes,
 ) -> Result<(), aws_sdk_s3::Error> {
+    put_object(client, bucket, key, "application/epub+zip", body).await
+}
+
+pub async fn put_jpeg(
+    client: &Client,
+    bucket: &str,
+    key: &str,
+    body: Bytes,
+) -> Result<(), aws_sdk_s3::Error> {
+    put_object(client, bucket, key, "image/jpeg", body).await
+}
+
+async fn put_object(
+    client: &Client,
+    bucket: &str,
+    key: &str,
+    content_type: &str,
+    body: Bytes,
+) -> Result<(), aws_sdk_s3::Error> {
     client
         .put_object()
         .bucket(bucket)
         .key(key)
-        .content_type("application/epub+zip")
+        .content_type(content_type)
         .body(ByteStream::from(body))
         .send()
         .await?;
@@ -67,4 +86,16 @@ pub async fn get_epub(client: &Client, bucket: &str, key: &str) -> Result<Bytes,
         .into_bytes();
 
     Ok(bytes)
+}
+
+pub async fn delete_epub(client: &Client, bucket: &str, key: &str) -> Result<(), String> {
+    client
+        .delete_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(())
 }

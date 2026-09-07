@@ -2,16 +2,14 @@ import SwiftUI
 
 struct HomeView: View {
     @ObservedObject var store: LibraryStore
-    let books: [ReaderBook]
-    let readingDays: [ReadingDay]
 
     private var recentBook: ReaderBook? {
-        books.first
+        store.books.sorted { $0.lastOpenedAt > $1.lastOpenedAt }.first
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 18) {
                 Text("Home")
                     .font(.largeTitle.bold())
                     .padding(.top, 18)
@@ -23,134 +21,153 @@ struct HomeView: View {
                         RecentBookCard(book: recentBook)
                     }
                     .buttonStyle(.plain)
-                }
-
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Text("Reading Month")
-                            .font(.title3.bold())
-                        Spacer()
-                        Text(monthTotal)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    ReadingHeatmap(days: readingDays)
-                }
-
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Continue")
-                        .font(.title3.bold())
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 14) {
-                            ForEach(books.dropFirst()) { book in
-                                NavigationLink {
-                                    BookOpenView(book: book, store: store)
-                                } label: {
-                                    SmallBookCard(book: book)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
+                } else {
+                    ContentUnavailableView(
+                        "No Books Yet",
+                        systemImage: "books.vertical",
+                        description: Text("Add an EPUB from the Library tab.")
+                    )
+                    .frame(maxWidth: .infinity)
                 }
             }
             .padding(.horizontal, 20)
         }
         .scrollIndicators(.hidden)
     }
-
-    private var monthTotal: String {
-        let total = readingDays.reduce(0) { $0 + $1.minutesRead }
-        let hours = Double(total) / 60.0
-        return String(format: "%.1fh", hours)
-    }
 }
 
 struct RecentBookCard: View {
-    let book: ReaderBook
+    @ObservedObject var book: ReaderBook
 
     var body: some View {
-        HStack(spacing: 18) {
-            BookCover(book: book, width: 108, height: 158)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 18) {
+                BookCover(book: book, width: 116, height: 170)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Most Recent")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(book.title)
-                    .font(.title2.bold())
-                    .foregroundStyle(.primary)
-                Text(book.author)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Latest Book")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(book.title)
+                        .font(.title2.bold())
+                        .foregroundStyle(.primary)
+                    Text(book.author)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
-                ProgressView(value: Double(book.currentPage), total: Double(book.pageCount))
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(progressLabel)
+                        .font(.title3.weight(.bold))
+                    Spacer()
+                    Text("Page \(page) / \(pageCount)")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                ProgressView(value: Double(page), total: Double(pageCount))
                     .tint(.primary)
-                    .padding(.top, 6)
-
-                Text("Page \(book.currentPage) of \(book.pageCount)")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
             }
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
+
+    private var pageCount: Int {
+        max(1, book.pageCount)
+    }
+
+    private var page: Int {
+        min(max(1, book.currentPage), pageCount)
+    }
+
+    private var progressLabel: String {
+        guard pageCount > 1 else {
+            return "0%"
+        }
+        let percent = Int((Double(page - 1) / Double(pageCount - 1) * 100).rounded())
+        return "\(percent)%"
+    }
 }
 
 struct SmallBookCard: View {
     let book: ReaderBook
+    var onRemove: (() -> Void)?
+    var onRename: (() -> Void)?
+    var onDownload: (() -> Void)?
+    var onMarkFinished: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 7) {
             BookCover(book: book, width: 96, height: 142)
-                .overlay(alignment: .topTrailing) {
-                    if book.isDownloaded {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.white, .green)
-                            .padding(6)
-                    }
+
+            HStack(spacing: 8) {
+                Text(progressLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 4)
+
+                if !book.isDownloaded {
+                    Image(systemName: "icloud.and.arrow.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                 }
-            Text(book.title)
-                .font(.subheadline.bold())
-                .lineLimit(2)
-                .frame(width: 104, alignment: .leading)
-            Text("\(book.currentPage)/\(book.pageCount)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
 
-struct ReadingHeatmap: View {
-    let days: [ReadingDay]
+                if hasActions {
+                    Menu {
+                        Button {
+                            onRename?()
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
+                        Button {
+                            onDownload?()
+                        } label: {
+                            Label("Download", systemImage: "icloud.and.arrow.down")
+                        }
+                        .disabled(book.isDownloaded)
 
-    var body: some View {
-        LazyVGrid(columns: columns, spacing: 5) {
-            ForEach(days.suffix(35), id: \.date) { day in
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(color(for: day.minutesRead))
-                    .aspectRatio(1, contentMode: .fit)
-                    .accessibilityLabel("\(day.minutesRead) minutes")
+                        Button {
+                            onMarkFinished?()
+                        } label: {
+                            Label("Mark as Finished", systemImage: "checkmark.circle")
+                        }
+
+                        Button(role: .destructive) {
+                            onRemove?()
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.caption.weight(.bold))
+                            .frame(width: 24, height: 24)
+                            .background(.regularMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+            .frame(width: 96)
         }
-        .padding(14)
-        .background(.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .frame(width: 104, alignment: .leading)
     }
 
-    private func color(for minutes: Int) -> Color {
-        switch minutes {
-        case 0: Color(.systemGray5)
-        case 1..<15: Color.green.opacity(0.28)
-        case 15..<30: Color.green.opacity(0.48)
-        case 30..<60: Color.green.opacity(0.72)
-        default: Color.green
+    private var progressLabel: String {
+        let pageCount = max(1, book.pageCount)
+        let page = min(max(1, book.currentPage), pageCount)
+        guard pageCount > 1 else {
+            return "0%"
         }
+        let percent = Int((Double(page - 1) / Double(pageCount - 1) * 100).rounded())
+        return "\(percent)%"
+    }
+
+    private var hasActions: Bool {
+        onRemove != nil || onRename != nil || onDownload != nil || onMarkFinished != nil
     }
 }

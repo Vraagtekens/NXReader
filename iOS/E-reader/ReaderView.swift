@@ -17,8 +17,9 @@ struct ReaderView: View {
     @State private var renderedPages: [ReaderPage] = []
     @State private var readerSize: CGSize = .zero
     @State private var paginationTask: Task<Void, Never>?
+    @State private var progressSaveTask: Task<Void, Never>?
     @State private var liveFontSize = 22.0
-    @State private var isPaginating = false
+    @State private var noteDraft = ""
 
     private var fontSize: CGFloat {
         CGFloat(liveFontSize)
@@ -55,21 +56,13 @@ struct ReaderView: View {
             theme.background.ignoresSafeArea()
 
             TabView(selection: $pageIndex) {
-                ReaderCoverPage(book: book, theme: theme)
-                    .tag(0)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            showChrome.toggle()
-                        }
-                    }
-
                 ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
                     ReaderPageView(
                         page: page,
                         fontSize: fontSize,
                         fontFamily: fontFamily,
                         theme: theme,
+                        images: book.inlineImages,
                         highlights: book.highlights,
                         selectedText: $selectedText
                     )
@@ -94,6 +87,10 @@ struct ReaderView: View {
                     lockRotation: lockRotation,
                     onBack: { dismiss() },
                     onHighlight: highlightSelection,
+                    onNote: {
+                        noteDraft = ""
+                        activeSheet = .note
+                    },
                     onContents: { activeSheet = .contents },
                     onSettings: { activeSheet = .settings },
                     onToggleRotationLock: { lockRotation.toggle() }
@@ -111,7 +108,7 @@ struct ReaderView: View {
                 return
             }
             readerSize = size
-            rebuildPages(targetPageIndex: pageIndex)
+            rebuildPages(targetPageIndex: max(1, pageIndex))
         }
         .preferredColorScheme(useDarkMode ? .dark : .light)
         .navigationBarBackButtonHidden(true)
@@ -119,30 +116,36 @@ struct ReaderView: View {
         .toolbar(.hidden, for: .tabBar)
         .onAppear {
             liveFontSize = storedFontSize
-            book.lastOpenedAt = .now
-            rebuildPages(targetPageIndex: max(book.currentPage, 0))
+            store.markOpened(book)
+            pageIndex = max(1, book.currentPage)
+            rebuildPages(targetPageIndex: max(1, book.currentPage))
             OrientationController.shared.setRotationLocked(lockRotation)
         }
         .onChange(of: pageIndex) { _, newValue in
             selectedText = ""
-            book.currentPage = max(1, newValue)
+            book.currentPage = min(max(1, newValue), pages.count)
             book.pageCount = max(1, pages.count)
+            scheduleProgressSave()
         }
         .onChange(of: storedFontSize) { _, _ in
             liveFontSize = storedFontSize
-            rebuildPages(delayNanoseconds: 120_000_000, targetPageIndex: pageIndex)
+            rebuildPages(targetPageIndex: pageIndex)
         }
         .onChange(of: storedFontFamily) { _, _ in
-            rebuildPages(delayNanoseconds: 120_000_000)
+            rebuildPages(targetPageIndex: pageIndex)
         }
         .onChange(of: book.sampleText) { _, _ in
-            rebuildPages()
+            rebuildPages(targetPageIndex: pageIndex)
         }
         .onChange(of: lockRotation) { _, newValue in
             OrientationController.shared.setRotationLocked(newValue)
         }
         .onDisappear {
             paginationTask?.cancel()
+            progressSaveTask?.cancel()
+            Task {
+                await store.saveProgress(book)
+            }
             OrientationController.shared.setRotationLocked(false)
         }
         .sheet(item: $activeSheet) { sheet in
@@ -160,6 +163,14 @@ struct ReaderView: View {
                 )
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+            case .note:
+                ReaderNoteSheet(
+                    selectedText: selectedText,
+                    note: $noteDraft,
+                    onSave: saveNote
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
         }
     }
@@ -173,25 +184,28 @@ struct ReaderView: View {
         selectedText = ""
     }
 
-    private func rebuildPages(delayNanoseconds: UInt64 = 0, targetPageIndex: Int? = nil) {
+    private func saveNote() {
+        store.addNote(
+            book: book,
+            page: max(1, pageIndex),
+            selectedText: selectedText,
+            note: noteDraft
+        )
+        noteDraft = ""
+        selectedText = ""
+        activeSheet = nil
+    }
+
+    private func rebuildPages(targetPageIndex: Int? = nil) {
         paginationTask?.cancel()
-        isPaginating = true
 
         let text = book.sampleText
         let size = CGFloat(storedFontSize)
-        let family = fontFamily
         let area = textAreaSize
-        let destinationIndex = targetPageIndex ?? pageIndex
+        let destinationIndex = max(1, targetPageIndex ?? pageIndex)
 
         paginationTask = Task {
-            if delayNanoseconds > 0 {
-                try? await Task.sleep(nanoseconds: delayNanoseconds)
-                guard !Task.isCancelled else {
-                    return
-                }
-            }
-
-            let quickPages = await Task.detached(priority: .userInitiated) {
+            let builtPages = await Task.detached(priority: .userInitiated) {
                 ReaderFastPaginator.pages(
                     from: text,
                     fontSize: size,
@@ -203,35 +217,27 @@ struct ReaderView: View {
                 return
             }
 
-            renderedPages = quickPages
-            pageIndex = min(destinationIndex, quickPages.count)
-            book.pageCount = max(1, quickPages.count)
+            renderedPages = builtPages
+            pageIndex = min(destinationIndex, max(1, builtPages.count))
+            book.pageCount = max(1, builtPages.count)
+            book.currentPage = min(max(1, pageIndex), book.pageCount)
+            scheduleProgressSave()
+        }
+    }
 
-            let builtPages = await Task.detached(priority: .userInitiated) {
-                ReaderPaginator.pages(
-                    from: text,
-                    fontSize: size,
-                    fontFamily: family,
-                    pageSize: area
-                )
-            }.value
-
+    private func scheduleProgressSave() {
+        progressSaveTask?.cancel()
+        progressSaveTask = Task {
+            try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled else {
                 return
             }
-
-            renderedPages = builtPages
-            pageIndex = min(pageIndex, builtPages.count)
-            book.pageCount = max(1, builtPages.count)
-            isPaginating = false
+            await store.saveProgress(book)
         }
     }
 
     private var pageLabel: String {
-        if isPaginating, renderedPages.isEmpty {
-            return "Loading..."
-        }
-        return pageIndex == 0 ? "Cover" : "Page \(pageIndex) of \(max(1, pages.count))"
+        return "Page \(pageIndex) of \(max(1, pages.count))"
     }
 }
 
@@ -246,14 +252,15 @@ private struct ReaderSizePreferenceKey: PreferenceKey {
 private enum ReaderSheet: String, Identifiable {
     case contents
     case settings
+    case note
 
     var id: String { rawValue }
 }
 
 private enum ReaderLayout {
-    static let horizontalPadding: CGFloat = 30
-    static let topPadding: CGFloat = 94
-    static let bottomPadding: CGFloat = 52
+    static let horizontalPadding: CGFloat = 32
+    static let topPadding: CGFloat = 96
+    static let bottomPadding: CGFloat = 88
 }
 
 private struct ReaderChrome: View {
@@ -264,6 +271,7 @@ private struct ReaderChrome: View {
     let lockRotation: Bool
     let onBack: () -> Void
     let onHighlight: () -> Void
+    let onNote: () -> Void
     let onContents: () -> Void
     let onSettings: () -> Void
     let onToggleRotationLock: () -> Void
@@ -291,14 +299,25 @@ private struct ReaderChrome: View {
             .padding(.top, 12)
 
             if !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button(action: onHighlight) {
-                    Label("Highlight", systemImage: "highlighter")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .background(.regularMaterial, in: Capsule())
+                HStack(spacing: 10) {
+                    Button(action: onHighlight) {
+                        Label("Highlight", systemImage: "highlighter")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(.regularMaterial, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: onNote) {
+                        Label("Note", systemImage: "square.and.pencil")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(.regularMaterial, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
                 .padding(.top, 8)
             }
 
@@ -326,6 +345,45 @@ private struct ReaderChrome: View {
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 14)
+        }
+    }
+}
+
+private struct ReaderNoteSheet: View {
+    let selectedText: String
+    @Binding var note: String
+    let onSave: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Selection") {
+                    Text(selectedText)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Note") {
+                    TextEditor(text: $note)
+                        .frame(minHeight: 120)
+                }
+            }
+            .navigationTitle("Add Note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave()
+                    }
+                    .disabled(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
         }
     }
 }
@@ -419,6 +477,7 @@ private struct ReaderPageView: View {
     let fontSize: CGFloat
     let fontFamily: ReaderFont
     let theme: ReaderTheme
+    let images: [String: ReaderInlineImage]
     let highlights: [String]
     @Binding var selectedText: String
 
@@ -429,6 +488,7 @@ private struct ReaderPageView: View {
                 fontSize: fontSize,
                 fontFamily: fontFamily,
                 theme: theme,
+                images: images,
                 highlights: highlights,
                 selectedText: $selectedText
             )
@@ -447,6 +507,7 @@ private struct SelectableReaderText: UIViewRepresentable {
     let fontSize: CGFloat
     let fontFamily: ReaderFont
     let theme: ReaderTheme
+    let images: [String: ReaderInlineImage]
     let highlights: [String]
     @Binding var selectedText: String
 
@@ -497,7 +558,11 @@ private struct SelectableReaderText: UIViewRepresentable {
         let output = NSMutableAttributedString()
 
         for (index, block) in blocks.enumerated() {
-            output.append(block.attributedText(fontSize: fontSize, fontFamily: fontFamily, theme: theme))
+            if block.kind == .image {
+                output.append(imageAttachment(for: block))
+            } else {
+                output.append(block.attributedText(fontSize: fontSize, fontFamily: fontFamily, theme: theme))
+            }
             if index < blocks.count - 1 {
                 output.append(NSAttributedString(string: "\n"))
             }
@@ -507,12 +572,35 @@ private struct SelectableReaderText: UIViewRepresentable {
         return output
     }
 
+    private func imageAttachment(for block: ReaderTextBlock) -> NSAttributedString {
+        guard let inlineImage = images[block.markdown],
+              let image = UIImage(data: inlineImage.data)
+        else {
+            return NSAttributedString(string: "")
+        }
+
+        let maxWidth: CGFloat = 260
+        let ratio = image.size.width > 0 ? image.size.height / image.size.width : 0.65
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = CGRect(x: 0, y: -4, width: maxWidth, height: maxWidth * ratio)
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.paragraphSpacing = 12
+
+        let output = NSMutableAttributedString(attachment: attachment)
+        output.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: output.length))
+        return output
+    }
+
     private var renderSignature: String {
         [
             blocks.map { "\($0.kind.signature):\($0.markdown)" }.joined(separator: "|"),
             String(Double(fontSize)),
             fontFamily.rawValue,
             theme.id,
+            images.keys.sorted().joined(separator: "|"),
             highlights.joined(separator: "|")
         ].joined(separator: "::")
     }
@@ -685,6 +773,7 @@ private struct ReaderTextBlock: Identifiable {
         case heading3
         case metadata
         case listItem
+        case image
         case paragraph
     }
 
@@ -761,6 +850,8 @@ private struct ReaderTextBlock: Identifiable {
             2
         case .metadata:
             4
+        case .image:
+            0
         case .listItem, .paragraph:
             7
         }
@@ -774,6 +865,8 @@ private struct ReaderTextBlock: Identifiable {
             14
         case .metadata:
             8
+        case .image:
+            12
         case .listItem, .paragraph:
             5
         }
@@ -789,6 +882,8 @@ private struct ReaderTextBlock: Identifiable {
             fontSize + 4
         case .metadata:
             fontSize - 1
+        case .image:
+            fontSize
         case .listItem, .paragraph:
             fontSize
         }
@@ -811,6 +906,8 @@ private struct ReaderTextBlock: Identifiable {
                     ReaderTextBlock(kind: .metadata, markdown: raw)
                 case .listItem:
                     ReaderTextBlock(kind: .listItem, markdown: listBody(raw))
+                case .image:
+                    ReaderTextBlock(kind: .image, markdown: raw)
                 case .paragraph:
                     ReaderTextBlock(kind: .paragraph, markdown: raw)
                 }
@@ -838,6 +935,9 @@ private struct ReaderTextBlock: Identifiable {
         }
         if raw.hasPrefix("- ") || lowered.hasPrefix("liste:") {
             return .listItem
+        }
+        if raw.hasPrefix("[[NX_IMAGE_") && raw.hasSuffix("]]") {
+            return .image
         }
         return .paragraph
     }
@@ -868,6 +968,7 @@ private extension ReaderTextBlock.Kind {
         case .heading3: "h3"
         case .metadata: "meta"
         case .listItem: "li"
+        case .image: "img"
         case .paragraph: "p"
         }
     }
@@ -876,14 +977,14 @@ private extension ReaderTextBlock.Kind {
         switch self {
         case .heading1, .heading2, .heading3:
             true
-        case .metadata, .listItem, .paragraph:
+        case .metadata, .listItem, .image, .paragraph:
             false
         }
     }
 
     var isCentered: Bool {
         switch self {
-        case .heading1, .heading2, .heading3, .metadata:
+        case .heading1, .heading2, .heading3, .metadata, .image:
             true
         case .listItem, .paragraph:
             false
@@ -1022,11 +1123,6 @@ private enum ReaderFastPaginator {
                 continue
             }
 
-            if !current.isEmpty {
-                flush(&current, into: &pages)
-                currentLines = 0
-            }
-
             appendSplitting(paragraph, current: &current, currentLines: &currentLines, into: &pages, budget: budget)
         }
 
@@ -1042,26 +1138,52 @@ private enum ReaderFastPaginator {
         budget: PageBudget
     ) {
         let words = paragraph.split(separator: " ").map(String.init)
-        var chunk: [String] = []
-        var chunkLines = 0
+        var index = 0
 
-        for word in words {
-            let candidate = (chunk + [word]).joined(separator: " ")
-            let candidateLines = estimatedLines(for: candidate, budget: budget)
-            if candidateLines > budget.maxLines, !chunk.isEmpty {
-                current = [chunk.joined(separator: " ")]
+        while index < words.count {
+            let separatorLines = current.isEmpty ? 0 : 1
+            let availableLines = budget.maxLines - currentLines - separatorLines
+
+            if availableLines <= 0 {
                 flush(&current, into: &pages)
-                chunk = [word]
-                chunkLines = estimatedLines(for: word, budget: budget)
-            } else {
-                chunk.append(word)
-                chunkLines = candidateLines
+                currentLines = 0
+                continue
             }
-        }
 
-        if !chunk.isEmpty {
-            current = [chunk.joined(separator: " ")]
-            currentLines = chunkLines
+            var chunk: [String] = []
+            var chunkCharacters = 0
+
+            while index < words.count {
+                let word = words[index]
+                let candidateCharacters = chunkCharacters + (chunk.isEmpty ? 0 : 1) + word.count
+                let candidateLines = max(1, Int(ceil(Double(candidateCharacters) / Double(budget.charactersPerLine))))
+
+                if candidateLines > availableLines, !chunk.isEmpty {
+                    break
+                }
+
+                chunk.append(word)
+                chunkCharacters = candidateCharacters
+                index += 1
+
+                if candidateLines >= availableLines {
+                    break
+                }
+            }
+
+            if chunk.isEmpty {
+                chunk = [words[index]]
+                chunkCharacters = words[index].count
+                index += 1
+            }
+
+            current.append(chunk.joined(separator: " "))
+            currentLines += separatorLines + max(1, Int(ceil(Double(chunkCharacters) / Double(budget.charactersPerLine))))
+
+            if index < words.count {
+                flush(&current, into: &pages)
+                currentLines = 0
+            }
         }
     }
 
@@ -1097,10 +1219,10 @@ private enum ReaderFastPaginator {
         let maxLines: Int
 
         init(fontSize: CGFloat, pageSize: CGSize) {
-            let averageCharacterWidth = max(6, fontSize * 0.50)
+            let averageCharacterWidth = max(6, fontSize * 0.48)
             charactersPerLine = max(18, Int(pageSize.width / averageCharacterWidth))
 
-            let lineHeight = max(21, fontSize * 1.34)
+            let lineHeight = max(20, fontSize * 1.26)
             maxLines = max(8, Int((pageSize.height - 8) / lineHeight))
         }
     }

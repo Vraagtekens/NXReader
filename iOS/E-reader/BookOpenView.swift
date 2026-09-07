@@ -31,6 +31,7 @@ struct BookOpenView: View {
                     if book.storageKey != nil {
                         cachedURL = await store.ensureDownloaded(book)
                         guard cachedURL != nil else { return }
+                        await store.loadProgress(book)
                     }
                     isReadable = await store.loadReadableText(book)
                 }

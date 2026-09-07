@@ -7,7 +7,18 @@ pub struct EpubCover {
     pub mime_type: String,
 }
 
-pub fn extract_text(bytes: Bytes) -> Result<String, String> {
+pub struct EpubRead {
+    pub text: String,
+    pub images: Vec<EpubReadImage>,
+}
+
+pub struct EpubReadImage {
+    pub marker: String,
+    pub bytes: Vec<u8>,
+    pub mime_type: String,
+}
+
+pub fn extract_read(bytes: Bytes) -> Result<EpubRead, String> {
     let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|error| error.to_string())?;
     let rootfile = rootfile_path(&mut archive)?;
     let opf = read_file(&mut archive, &rootfile)?;
@@ -17,6 +28,7 @@ pub fn extract_text(bytes: Bytes) -> Result<String, String> {
         .unwrap_or_default();
     let manifest = manifest_items(&opf);
     let mut chapters = Vec::new();
+    let mut images = Vec::new();
 
     for idref in spine_ids(&opf) {
         let Some(item) = manifest.iter().find(|item| item.id == idref) else {
@@ -27,24 +39,31 @@ pub fn extract_text(bytes: Bytes) -> Result<String, String> {
                 &mut archive,
                 &join_path(&base_path, &item.href),
                 &mut chapters,
+                &mut images,
             );
         }
     }
 
     let meaningful = meaningful_chapters(&chapters);
     if !meaningful.is_empty() {
-        return Ok(meaningful.join("\n\n"));
+        return Ok(EpubRead {
+            text: meaningful.join("\n\n"),
+            images,
+        });
     }
 
     for path in html_paths(&mut archive) {
-        read_chapter(&mut archive, &path, &mut chapters);
+        read_chapter(&mut archive, &path, &mut chapters, &mut images);
     }
 
     let meaningful = meaningful_chapters(&chapters);
     if !meaningful.is_empty() {
-        Ok(meaningful.join("\n\n"))
+        Ok(EpubRead {
+            text: meaningful.join("\n\n"),
+            images,
+        })
     } else if let Some(text) = chapters.into_iter().find(|chapter| !chapter.is_empty()) {
-        Ok(text)
+        Ok(EpubRead { text, images })
     } else {
         Err("No readable XHTML chapters were found in this EPUB".to_string())
     }
@@ -86,11 +105,16 @@ fn rootfile_path(archive: &mut ZipArchive<Cursor<Bytes>>) -> Result<String, Stri
         .ok_or_else(|| "EPUB container.xml does not declare a rootfile".to_string())
 }
 
-fn read_chapter(archive: &mut ZipArchive<Cursor<Bytes>>, path: &str, chapters: &mut Vec<String>) {
+fn read_chapter(
+    archive: &mut ZipArchive<Cursor<Bytes>>,
+    path: &str,
+    chapters: &mut Vec<String>,
+    images: &mut Vec<EpubReadImage>,
+) {
     let Ok(xhtml) = read_file(archive, path) else {
         return;
     };
-    let text = html_to_text(&xhtml);
+    let text = html_to_text(&xhtml, archive, path, images);
     if !text.is_empty() && !chapters.iter().any(|chapter| chapter == &text) {
         chapters.push(text);
     }
@@ -258,7 +282,12 @@ fn join_path(base: &str, href: &str) -> String {
     }
 }
 
-fn html_to_text(html: &str) -> String {
+fn html_to_text(
+    html: &str,
+    archive: &mut ZipArchive<Cursor<Bytes>>,
+    chapter_path: &str,
+    images: &mut Vec<EpubReadImage>,
+) -> String {
     let mut text = String::new();
     let mut in_tag = false;
     let mut tag = String::new();
@@ -289,6 +318,14 @@ fn html_to_text(html: &str) -> String {
                         (false, "strong" | "b") | (true, "strong" | "b") => text.push_str("**"),
                         (false, "em" | "i") | (true, "em" | "i") => text.push('_'),
                         (false, "li") => text.push_str("\n- "),
+                        (false, "img" | "image") => {
+                            if let Some(marker) = read_inline_image(archive, chapter_path, &tag, images)
+                            {
+                                text.push_str("\n\n");
+                                text.push_str(&marker);
+                                text.push_str("\n\n");
+                            }
+                        }
                         _ if is_block_tag(&normalized) => text.push('\n'),
                         _ => {}
                     }
@@ -301,6 +338,66 @@ fn html_to_text(html: &str) -> String {
     }
 
     normalize_whitespace(&html_unescape(&text))
+}
+
+fn read_inline_image(
+    archive: &mut ZipArchive<Cursor<Bytes>>,
+    chapter_path: &str,
+    tag: &str,
+    images: &mut Vec<EpubReadImage>,
+) -> Option<String> {
+    let src = attr_value(tag, "src")
+        .or_else(|| attr_value(tag, "href"))
+        .or_else(|| attr_value(tag, "xlink:href"))?;
+    let src = src.split('#').next().unwrap_or(&src);
+    if src.is_empty() || src.starts_with("data:") || src.starts_with("http") {
+        return None;
+    }
+
+    let chapter_dir = chapter_path
+        .rsplit_once('/')
+        .map(|(base, _)| base)
+        .unwrap_or_default();
+    let image_path = normalize_path(&join_path(chapter_dir, src));
+    let bytes = read_binary_file(archive, &image_path).ok()?;
+    let marker = format!("[[NX_IMAGE_{}]]", images.len());
+    images.push(EpubReadImage {
+        marker: marker.clone(),
+        bytes,
+        mime_type: image_mime_type(&image_path),
+    });
+    Some(marker)
+}
+
+fn normalize_path(path: &str) -> String {
+    let mut parts = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            value => parts.push(value),
+        }
+    }
+    parts.join("/")
+}
+
+fn image_mime_type(path: &str) -> String {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg".to_string()
+    } else if lower.ends_with(".png") {
+        "image/png".to_string()
+    } else if lower.ends_with(".webp") {
+        "image/webp".to_string()
+    } else if lower.ends_with(".gif") {
+        "image/gif".to_string()
+    } else if lower.ends_with(".svg") {
+        "image/svg+xml".to_string()
+    } else {
+        "application/octet-stream".to_string()
+    }
 }
 
 fn tag_name(tag: &str) -> String {
@@ -363,13 +460,13 @@ fn html_unescape(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_cover, extract_text};
+    use super::{extract_cover, extract_read};
     use bytes::Bytes;
 
     #[test]
     fn extracts_text_from_typography_sample() {
         let bytes = std::fs::read("../NXReader/samples/typography-test.epub").unwrap();
-        let text = extract_text(Bytes::from(bytes)).unwrap();
+        let text = extract_read(Bytes::from(bytes)).unwrap().text;
 
         assert!(text.contains("Grand titre H1"));
         assert!(text.contains("Sous-titre H2"));

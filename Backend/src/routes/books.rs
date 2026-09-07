@@ -1,5 +1,5 @@
 use crate::{
-    contracts::{Book, BookRead, UpsertBookRequest},
+    contracts::{Book, BookRead, BookReadImage, UpsertBookRequest},
     error::{ApiError, ApiResult},
     services::{
         books::{self, UploadedBook},
@@ -14,8 +14,11 @@ use axum::{
     http::{StatusCode, header},
     response::Response,
 };
+use base64::{Engine as _, engine::general_purpose};
 use bytes::Bytes;
+use image::codecs::jpeg::JpegEncoder;
 use sha2::{Digest, Sha256};
+use std::io::Cursor;
 use uuid::Uuid;
 
 #[utoipa::path(
@@ -109,6 +112,26 @@ pub async fn upload_book(
     .await
     .map_err(|error| ApiError::Storage(error.to_string()))?;
 
+    let cover_storage_key = match epub::extract_cover(file_bytes.clone())
+        .ok()
+        .flatten()
+        .and_then(|cover| convert_cover_to_jpeg(&cover.bytes).ok())
+    {
+        Some(cover_jpeg) => {
+            let key = format!("covers/{content_hash}.jpg");
+            storage::put_jpeg(
+                &state.s3,
+                &state.s3_bucket,
+                &key,
+                Bytes::from(cover_jpeg),
+            )
+            .await
+            .map_err(|error| ApiError::Storage(error.to_string()))?;
+            Some(key)
+        }
+        None => None,
+    };
+
     let title = title
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| title_from_file_name(&file_name));
@@ -121,6 +144,7 @@ pub async fn upload_book(
             author: author.filter(|value| !value.trim().is_empty()),
             file_name: Some(file_name),
             storage_key,
+            cover_storage_key,
             mime_type: "application/epub+zip".to_string(),
             file_size_bytes: file_bytes.len() as i64,
         },
@@ -148,6 +172,35 @@ pub async fn get_book(
 }
 
 #[utoipa::path(
+    delete,
+    path = "/books/{book_id}",
+    tag = "books",
+    params(("book_id" = Uuid, Path, description = "Book id")),
+    responses((status = 204), (status = 404))
+)]
+pub async fn delete_book(
+    State(state): State<AppState>,
+    Path(book_id): Path<Uuid>,
+) -> ApiResult<StatusCode> {
+    let book = books::delete(&state.pool, book_id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+
+    if let Some(storage_key) = book.storage_key {
+        storage::delete_epub(&state.s3, &state.s3_bucket, &storage_key)
+            .await
+            .map_err(ApiError::Storage)?;
+    }
+    if let Some(cover_storage_key) = book.cover_storage_key {
+        storage::delete_epub(&state.s3, &state.s3_bucket, &cover_storage_key)
+            .await
+            .map_err(ApiError::Storage)?;
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
     get,
     path = "/books/{book_id}/download",
     tag = "books",
@@ -161,6 +214,19 @@ pub async fn download_book(
     let book = books::get(&state.pool, book_id)
         .await?
         .ok_or(ApiError::NotFound)?;
+
+    if let Some(cover_storage_key) = book.cover_storage_key {
+        let bytes = storage::get_epub(&state.s3, &state.s3_bucket, &cover_storage_key)
+            .await
+            .map_err(|error| ApiError::Storage(error.to_string()))?;
+
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "image/jpeg")
+            .body(Body::from(bytes))
+            .map_err(|error| ApiError::Storage(error.to_string()));
+    }
+
     let storage_key = book.storage_key.clone().ok_or(ApiError::NotFound)?;
     let bytes = storage::get_epub(&state.s3, &state.s3_bucket, &storage_key)
         .await
@@ -228,12 +294,21 @@ pub async fn read_book(
     let bytes = storage::get_epub(&state.s3, &state.s3_bucket, &storage_key)
         .await
         .map_err(|error| ApiError::Storage(error.to_string()))?;
-    let text = epub::extract_text(bytes).map_err(ApiError::Storage)?;
+    let content = epub::extract_read(bytes).map_err(ApiError::Storage)?;
 
     Ok(Json(BookRead {
         book_id: book.id,
         title: book.title,
-        text,
+        text: content.text,
+        images: content
+            .images
+            .into_iter()
+            .map(|image| BookReadImage {
+                marker: image.marker,
+                mime_type: image.mime_type,
+                data_base64: general_purpose::STANDARD.encode(image.bytes),
+            })
+            .collect(),
     }))
 }
 
@@ -258,4 +333,15 @@ fn sanitize_header_value(value: &str) -> String {
             character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
         })
         .collect()
+}
+
+fn convert_cover_to_jpeg(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let image = image::load_from_memory(bytes).map_err(|error| error.to_string())?;
+    let rgb = image.to_rgb8();
+    let mut output = Cursor::new(Vec::new());
+    let mut encoder = JpegEncoder::new_with_quality(&mut output, 88);
+    encoder
+        .encode_image(&rgb)
+        .map_err(|error| error.to_string())?;
+    Ok(output.into_inner())
 }

@@ -20,11 +20,7 @@ struct ContentView: View {
     var body: some View {
         TabView {
             NavigationStack {
-                HomeView(
-                    store: store,
-                    books: store.books.sorted { $0.lastOpenedAt > $1.lastOpenedAt },
-                    readingDays: store.readingDays
-                )
+                HomeView(store: store)
             }
             .tabItem {
                 Label(ReaderTab.home.rawValue, systemImage: ReaderTab.home.icon)

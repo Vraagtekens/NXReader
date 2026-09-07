@@ -7,6 +7,7 @@ struct BackendBook: Decodable {
     let author: String?
     let fileName: String?
     let storageKey: String?
+    let coverStorageKey: String?
     let mimeType: String?
     let fileSizeBytes: Int64?
     let createdAt: Date
@@ -17,6 +18,35 @@ struct BackendBookRead: Decodable {
     let bookId: UUID
     let title: String
     let text: String
+    let images: [BackendBookReadImage]
+
+    enum CodingKeys: String, CodingKey {
+        case bookId
+        case title
+        case text
+        case images
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        bookId = try container.decode(UUID.self, forKey: .bookId)
+        title = try container.decode(String.self, forKey: .title)
+        text = try container.decode(String.self, forKey: .text)
+        images = try container.decodeIfPresent([BackendBookReadImage].self, forKey: .images) ?? []
+    }
+}
+
+struct BackendBookReadImage: Decodable {
+    let marker: String
+    let mimeType: String
+    let dataBase64: String
+}
+
+struct BackendReadingProgress: Decodable {
+    let bookId: UUID
+    let page: Int
+    let pageCount: Int?
+    let progressPercent: Double?
 }
 
 enum BackendClientError: LocalizedError {
@@ -71,6 +101,32 @@ final class BackendClient {
         return try decoder.decode([BackendBook].self, from: data)
     }
 
+    func uploadBook(fileURL: URL) async throws -> BackendBook {
+        let fileData = try Data(contentsOf: fileURL)
+        let fileName = fileURL.lastPathComponent
+        let title = (fileName as NSString).deletingPathExtension
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+
+        body.appendMultipartField(name: "title", value: title, boundary: boundary)
+        body.appendMultipartFile(
+            name: "file",
+            fileName: fileName,
+            mimeType: "application/epub+zip",
+            data: fileData,
+            boundary: boundary
+        )
+        body.appendString("--\(boundary)--\r\n")
+
+        var request = try request(path: "/books/upload")
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(String(body.count), forHTTPHeaderField: "Content-Length")
+
+        let data = try await responseData(for: request, body: body)
+        return try decoder.decode(BackendBook.self, from: data)
+    }
+
     func downloadBook(_ book: ReaderBook) async throws -> URL {
         let destination = try BookCache.cachedURL(for: book)
         if FileManager.default.fileExists(atPath: destination.path) {
@@ -91,7 +147,47 @@ final class BackendClient {
         try await data(path: "/books/\(book.id.uuidString)/cover")
     }
 
-    private func data(path: String) async throws -> Data {
+    func deleteBook(_ book: ReaderBook) async throws {
+        var deleteRequest = try request(path: "/books/\(book.id.uuidString)")
+        deleteRequest.httpMethod = "DELETE"
+        do {
+            _ = try await responseData(for: deleteRequest)
+        } catch BackendClientError.badStatus(405) {
+            var fallbackRequest = try request(path: "/books/\(book.id.uuidString)/delete")
+            fallbackRequest.httpMethod = "POST"
+            _ = try await responseData(for: fallbackRequest)
+        }
+    }
+
+    func progress(for book: ReaderBook) async throws -> BackendReadingProgress? {
+        do {
+            let data = try await data(path: "/books/\(book.id.uuidString)/progress")
+            return try decoder.decode(BackendReadingProgress.self, from: data)
+        } catch BackendClientError.badStatus(404) {
+            return nil
+        }
+    }
+
+    func saveProgress(book: ReaderBook, page: Int, pageCount: Int) async throws {
+        let progressPercent = pageCount > 1
+            ? (Double(max(1, page) - 1) / Double(pageCount - 1)) * 100
+            : 0.0
+        let payload: [String: Any?] = [
+            "page": page,
+            "pageCount": pageCount,
+            "progressPercent": progressPercent,
+            "locator": ["page": page]
+        ]
+        let body = try JSONSerialization.data(withJSONObject: payload.compactMapValues { $0 })
+
+        var request = try request(path: "/books/\(book.id.uuidString)/progress")
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        _ = try await responseData(for: request, body: body)
+    }
+
+    private func request(path: String) throws -> URLRequest {
         guard apiKey != "replace-with-your-api-key", !apiKey.isEmpty else {
             throw BackendClientError.missingAPIKey
         }
@@ -99,8 +195,23 @@ final class BackendClient {
         let url = baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
         var request = URLRequest(url: url)
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        return request
+    }
 
-        let (data, response) = try await session.data(for: request)
+    private func data(path: String) async throws -> Data {
+        let request = try request(path: path)
+        return try await responseData(for: request)
+    }
+
+    private func responseData(for request: URLRequest, body: Data? = nil) async throws -> Data {
+        let dataAndResponse: (Data, URLResponse)
+        if let body {
+            dataAndResponse = try await session.upload(for: request, from: body)
+        } else {
+            dataAndResponse = try await session.data(for: request)
+        }
+
+        let (data, response) = dataAndResponse
         guard let httpResponse = response as? HTTPURLResponse else {
             throw BackendClientError.invalidResponse
         }
@@ -109,6 +220,32 @@ final class BackendClient {
         }
 
         return data
+    }
+}
+
+private extension Data {
+    mutating func appendString(_ string: String) {
+        append(Data(string.utf8))
+    }
+
+    mutating func appendMultipartField(name: String, value: String, boundary: String) {
+        appendString("--\(boundary)\r\n")
+        appendString("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
+        appendString("\(value)\r\n")
+    }
+
+    mutating func appendMultipartFile(
+        name: String,
+        fileName: String,
+        mimeType: String,
+        data: Data,
+        boundary: String
+    ) {
+        appendString("--\(boundary)\r\n")
+        appendString("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(fileName)\"\r\n")
+        appendString("Content-Type: \(mimeType)\r\n\r\n")
+        append(data)
+        appendString("\r\n")
     }
 }
 
@@ -146,6 +283,13 @@ enum BookCache {
         let url = try cachedURL(for: book)
         try data.write(to: url, options: .atomic)
         return url
+    }
+
+    static func remove(_ book: ReaderBook) throws {
+        let url = try cachedURL(for: book)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
     }
 
     private static func directory() throws -> URL {

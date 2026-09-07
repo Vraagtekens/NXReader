@@ -16,6 +16,7 @@ final class ReaderBook: ObservableObject, Identifiable {
     @Published var lastOpenedAt: Date
     let createdAt: Date
     @Published var sampleText: String
+    @Published var inlineImages: [String: ReaderInlineImage]
 
     init(
         id: UUID = UUID(),
@@ -31,7 +32,8 @@ final class ReaderBook: ObservableObject, Identifiable {
         lastOpenedAt: Date = .now,
         createdAt: Date = .now,
         sampleText: String,
-        highlights: [String] = []
+        highlights: [String] = [],
+        inlineImages: [String: ReaderInlineImage] = [:]
     ) {
         self.id = id
         self.title = title
@@ -47,7 +49,13 @@ final class ReaderBook: ObservableObject, Identifiable {
         self.createdAt = createdAt
         self.sampleText = sampleText
         self.highlights = highlights
+        self.inlineImages = inlineImages
     }
+}
+
+struct ReaderInlineImage {
+    let data: Data
+    let mimeType: String
 }
 
 struct ReaderNote: Identifiable {
@@ -92,6 +100,7 @@ final class LibraryStore: ObservableObject {
     @Published var readingDays: [ReadingDay]
     @Published var syncError: String?
     @Published var downloadingBookIDs: Set<UUID>
+    @Published var uploadingBook = false
 
     private let backend = BackendClient()
 
@@ -101,13 +110,24 @@ final class LibraryStore: ObservableObject {
         readingDays = SampleLibrary.readingDays
         syncError = nil
         downloadingBookIDs = []
+        uploadingBook = false
     }
 
     @MainActor
     func refreshFromBackend() async {
         do {
             let remoteBooks = try await backend.listBooks()
-            books = remoteBooks.map(ReaderBook.init(backendBook:))
+            let existingProgress = Dictionary(uniqueKeysWithValues: books.map {
+                ($0.id, ($0.currentPage, $0.pageCount))
+            })
+            books = remoteBooks.map { backendBook in
+                let book = ReaderBook(backendBook: backendBook)
+                if let progress = existingProgress[book.id] {
+                    book.currentPage = progress.0
+                    book.pageCount = progress.1
+                }
+                return book
+            }
             syncError = nil
         } catch {
             syncError = error.localizedDescription
@@ -147,6 +167,14 @@ final class LibraryStore: ObservableObject {
         do {
             let readable = try await backend.readBook(book)
             book.sampleText = readable.text
+            book.inlineImages = Dictionary(
+                uniqueKeysWithValues: readable.images.compactMap { image in
+                    guard let data = Data(base64Encoded: image.dataBase64) else {
+                        return nil
+                    }
+                    return (image.marker, ReaderInlineImage(data: data, mimeType: image.mimeType))
+                }
+            )
             book.pageCount = max(1, readable.text.count / 1_500)
             syncError = nil
             return true
@@ -156,23 +184,113 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func addImportedBook(fileName: String) {
-        let title = (fileName as NSString).deletingPathExtension
-        let book = ReaderBook(
-            title: title,
-            author: "Unknown Author",
-            fileName: fileName,
-            coverColorHex: ["3454D1", "1F8A70", "C44536", "8A4FFF"].randomElement() ?? "3454D1",
-            currentPage: 1,
-            pageCount: 1,
-            sampleText: SampleLibrary.readerText
-        )
-        books.insert(book, at: 0)
+    @MainActor
+    func uploadImportedBook(fileURL: URL) async {
+        uploadingBook = true
+        defer {
+            uploadingBook = false
+        }
+
+        do {
+            let uploaded = try await backend.uploadBook(fileURL: fileURL)
+            let book = ReaderBook(backendBook: uploaded)
+            books.removeAll { $0.id == book.id }
+            books.insert(book, at: 0)
+            syncError = nil
+        } catch {
+            syncError = error.localizedDescription
+        }
     }
 
+    @MainActor
+    func loadProgress(_ book: ReaderBook) async {
+        guard book.storageKey != nil else {
+            return
+        }
+
+        do {
+            guard let progress = try await backend.progress(for: book) else {
+                return
+            }
+            book.currentPage = max(1, progress.page)
+            if let pageCount = progress.pageCount {
+                book.pageCount = max(1, pageCount)
+            }
+            syncError = nil
+        } catch {
+            syncError = error.localizedDescription
+        }
+    }
+
+    func saveProgress(_ book: ReaderBook) async {
+        guard book.storageKey != nil else {
+            return
+        }
+
+        do {
+            try await backend.saveProgress(
+                book: book,
+                page: max(1, book.currentPage),
+                pageCount: max(1, book.pageCount)
+            )
+            await MainActor.run {
+                syncError = nil
+            }
+        } catch {
+            await MainActor.run {
+                syncError = error.localizedDescription
+            }
+        }
+    }
+
+    @MainActor
+    func removeBook(_ book: ReaderBook) async {
+        do {
+            if book.storageKey != nil {
+                try await backend.deleteBook(book)
+            }
+            try? BookCache.remove(book)
+            books.removeAll { $0.id == book.id }
+            syncError = nil
+        } catch {
+            syncError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func renameBook(_ book: ReaderBook, title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return
+        }
+        book.title = trimmed
+    }
+
+    @MainActor
+    func markFinished(_ book: ReaderBook) {
+        book.pageCount = max(1, book.pageCount)
+        book.currentPage = book.pageCount
+        Task {
+            await saveProgress(book)
+        }
+    }
+
+    @MainActor
+    func markOpened(_ book: ReaderBook) {
+        book.lastOpenedAt = .now
+        books.sort { $0.lastOpenedAt > $1.lastOpenedAt }
+    }
+
+    @MainActor
     func addNote(book: ReaderBook, page: Int, selectedText: String, note: String) {
+        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSelection = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedNote.isEmpty || !trimmedSelection.isEmpty else {
+            return
+        }
+
         notes.insert(
-            ReaderNote(bookTitle: book.title, page: page, selectedText: selectedText, note: note),
+            ReaderNote(bookTitle: book.title, page: page, selectedText: trimmedSelection, note: trimmedNote),
             at: 0
         )
     }

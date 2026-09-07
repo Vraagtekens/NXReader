@@ -2,11 +2,10 @@ import SwiftUI
 import UIKit
 
 struct BookCover: View {
-    let book: ReaderBook
+    @ObservedObject var book: ReaderBook
     let width: CGFloat
     let height: CGFloat
     @State private var coverImage: UIImage?
-    @State private var didTryLoadingCover = false
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -39,16 +38,20 @@ struct BookCover: View {
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .shadow(color: .black.opacity(0.18), radius: 12, y: 8)
-        .task(id: book.id) {
-            await loadCoverIfNeeded()
+        .task(id: coverLoadID) {
+            coverImage = nil
+            await loadCover()
         }
     }
 
-    private func loadCoverIfNeeded() async {
-        guard !didTryLoadingCover, book.storageKey != nil else {
+    private var coverLoadID: String {
+        "\(book.id.uuidString)-\(book.storageKey ?? "")"
+    }
+
+    private func loadCover() async {
+        guard book.storageKey != nil else {
             return
         }
-        didTryLoadingCover = true
 
         guard let data = try? await BackendClient().coverImageData(book),
               let image = UIImage(data: data) else {

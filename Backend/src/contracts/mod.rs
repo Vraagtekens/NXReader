@@ -14,6 +14,7 @@ use uuid::Uuid;
         crate::routes::books::list_books,
         crate::routes::books::upload_book,
         crate::routes::books::get_book,
+        crate::routes::books::delete_book,
         crate::routes::books::download_book,
         crate::routes::books::cover_book,
         crate::routes::books::read_book,
@@ -27,6 +28,7 @@ use uuid::Uuid;
         HealthResponse,
         Book,
         BookRead,
+        BookReadImage,
         UpsertBookRequest,
         ReadingProgress,
         PutProgressRequest,
@@ -71,6 +73,7 @@ pub struct Book {
     pub author: Option<String>,
     pub file_name: Option<String>,
     pub storage_key: Option<String>,
+    pub cover_storage_key: Option<String>,
     pub mime_type: Option<String>,
     pub file_size_bytes: Option<i64>,
     pub created_at: DateTime<Utc>,
@@ -83,6 +86,15 @@ pub struct BookRead {
     pub book_id: Uuid,
     pub title: String,
     pub text: String,
+    pub images: Vec<BookReadImage>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BookReadImage {
+    pub marker: String,
+    pub mime_type: String,
+    pub data_base64: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

@@ -10,6 +10,7 @@ iOS/DerivedData/
 iOS/**/*.xcuserstate
 iOS/**/*.xcuserdata/
 iOS/**/*.xcuserdatad/
+iOS/**/*.xcworkspacedata.sb-*
 
 # Local editor noise
 .vscode/
